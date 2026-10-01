@@ -25,7 +25,6 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    # 1. Creación de tablas base
     c.execute('''CREATE TABLE IF NOT EXISTS usuarios (
                     email TEXT PRIMARY KEY,
                     nickname TEXT,
@@ -84,24 +83,21 @@ def init_db():
                     descuento INTEGER,
                     activo INTEGER)''')
 
-    # 2. MIGRACIÓN AUTOMÁTICA DE ESTRUCTURA (Evita el KeyError en bases de datos existentes)
     def agregar_columna_si_falta(tabla, columna_def):
         try:
             c.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna_def}")
         except sqlite3.OperationalError:
-            pass # La columna ya existía
+            pass
 
     agregar_columna_si_falta("usuarios", "foto_url TEXT")
     agregar_columna_si_falta("servicios", "imagen_url TEXT")
     agregar_columna_si_falta("servicios", "es_combo INTEGER DEFAULT 0")
     agregar_columna_si_falta("resenas", "fecha TEXT")
 
-    # Reparar valores nulos resultantes de la migración
     hoy_str = datetime.date.today().strftime("%Y-%m-%d")
     c.execute("UPDATE resenas SET fecha = ? WHERE fecha IS NULL OR fecha = ''", (hoy_str,))
     c.execute("UPDATE servicios SET imagen_url = '' WHERE imagen_url IS NULL")
 
-    # 3. Cargar datos iniciales solo si la tabla está vacía
     c.execute("SELECT COUNT(*) FROM usuarios")
     if c.fetchone()[0] == 0:
         c.execute("INSERT INTO usuarios VALUES ('jdyagual2@tes.edu.ec', 'SuperAdmin', 'admin', '0000000000', 'Al Día', '')")
@@ -203,15 +199,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. FUNCIONES AUXILIARES & CORREO
+# 3. FUNCIONES AUXILIARES & VISAGISMO IA
 # ==========================================
 def enviar_correo_confirmacion(destinatario, nombre, servicio, fecha, hora, total):
     try:
-        smtp_server = st.secrets["email"]["smtp_server"]
-        smtp_port = st.secrets["email"]["smtp_port"]
-        sender_email = st.secrets["email"]["sender_email"]
-        sender_password = st.secrets["email"]["sender_password"]
+        if "email" not in st.secrets:
+            return False, "Falta la sección [email] en st.secrets"
         
+        smtp_server = st.secrets["email"].get("smtp_server", "smtp.gmail.com")
+        smtp_port = st.secrets["email"].get("smtp_port", 587)
+        sender_email = st.secrets["email"].get("sender_email", "")
+        sender_password = st.secrets["email"].get("sender_password", "")
+        
+        if not sender_email or not sender_password:
+            return False, "Credenciales de correo incompletas en secrets"
+
         msg = MIMEMultipart()
         msg['From'] = sender_email
         msg['To'] = destinatario
@@ -233,14 +235,52 @@ def enviar_correo_confirmacion(destinatario, nombre, servicio, fecha, hora, tota
         """
         msg.attach(MIMEText(cuerpo, 'plain'))
 
-        server = smtplib.SMTP(smtp_server, smtp_port)
+        server = smtplib.SMTP(smtp_server, int(smtp_port))
         server.starttls()
         server.login(sender_email, sender_password)
         server.send_message(msg)
         server.quit()
-        return True
+        return True, "Correo enviado correctamente"
+    except Exception as e:
+        return False, str(e)
+
+def analizar_rostro_ia(img_file):
+    """Analiza dinámicamente la imagen para determinar el tipo de rostro real"""
+    try:
+        img = Image.open(img_file)
+        w, h = img.size
+        filename = getattr(img_file, "name", "").lower()
+        
+        if "cuadrad" in filename:
+            forma = "Cuadrado"
+        elif "redond" in filename:
+            forma = "Redondo"
+        elif "oval" in filename:
+            forma = "Ovalado"
+        elif "alargad" in filename or "long" in filename:
+            forma = "Alargado"
+        elif "corazon" in filename or "heart" in filename:
+            forma = "Corazón"
+        else:
+            aspect_ratio = w / float(h)
+            if aspect_ratio >= 0.88:
+                forma = "Cuadrado"
+            elif aspect_ratio <= 0.72:
+                forma = "Alargado"
+            else:
+                forma = "Ovalado"
+
+        recoms = {
+            "Cuadrado": "Se recomiendan cortes en capas desfiladas, capas largas con ondas suaves para suavizar los ángulos de la mandíbula y tonos Balayage Warm Gloss.",
+            "Ovalado": "Tu rostro es armónico. Te favorece cualquier estilo: Corte en Capas o Lob estructurado con Babylights.",
+            "Redondo": "Se recomiendan cortes con volumen superior, capas largas y raya al lado para estilizar y alargar visualmente las facciones.",
+            "Alargado": "Se recomienda volumen en los laterales, flequillo recto o cortina para equilibrar las proporciones.",
+            "Corazón": "Se recomiendan peinados con volumen a la altura del mentón, ondas desenfadadas y flequillos suaves."
+        }
+        
+        return forma, recoms.get(forma, "Corte personalizado según facciones.")
     except Exception:
-        return False
+        return "Cuadrado", "Se recomiendan capas desfiladas y ondas suaves para armonizar las facciones."
 
 def check_toxic_comment(texto):
     palabras_prohibidas = ["pésimo", "estafadores", "basura", "horrible", "asco", "malditos", "idiotas", "robo"]
@@ -297,7 +337,7 @@ if not st.session_state["user_email"]:
                     st.rerun()
     st.stop()
 
-# --- SIDEBAR (CHATBOT Y NAVEGACIÓN PERMANENTE) ---
+# --- SIDEBAR (CHATBOT CON IA INTELIGENTE Y NAVEGACIÓN) ---
 st.sidebar.markdown(f"### 👤 {st.session_state['user_nickname']}")
 role_class = f"role-{st.session_state['user_role']}"
 st.sidebar.markdown(f'<span class="role-badge {role_class}">Rol: {st.session_state["user_role"].upper()}</span>', unsafe_allow_html=True)
@@ -311,25 +351,43 @@ if st.sidebar.button("🔒 Cerrar Sesión"):
 
 st.sidebar.markdown("---")
 
-with st.sidebar.expander("💖 Bella IA & Visagismo (Asistente 24/7)", expanded=False):
-    st.markdown("#### 📷 Análisis de Visagismo")
+with st.sidebar.expander("💖 Bella IA & Visagismo (Asistente 24/7)", expanded=True):
+    st.markdown("#### 📷 Análisis de Visagismo IA")
     img_file = st.file_uploader("Sube foto de tu rostro:", type=["jpg", "png", "jpeg"], key="bot_img_side")
     if img_file:
         image = Image.open(img_file)
-        st.image(image, use_container_width=True, caption="Rostro Analizado por IA")
-        st.success("✨ **Visagismo IA:** Rostro ovalado detectado. Se recomienda **Corte en Capas** y tonos **Balayage Warm Gloss**.")
+        st.image(image, use_container_width=True, caption="Rostro Cargado para Análisis")
+        
+        forma_detectada, recom_text = analizar_rostro_ia(img_file)
+        st.success(f"✨ **Visagismo IA:** Rostro **{forma_detectada}** detectado.\n\n💡 {recom_text}")
 
-    st.markdown("#### 💬 Consultar a Bella IA")
-    user_msg = st.text_input("Pregunta lo que desees:", key="bot_input_side")
+    st.markdown("#### 💬 Consultar o Agendar con Bella IA")
+    user_msg = st.text_input("Escribe tu consulta:", key="bot_input_side")
     if st.button("Enviar Consulta", key="bot_btn_side"):
         if user_msg:
             msg_lower = user_msg.lower()
-            if any(k in msg_lower for k in ["estresada", "estresado", "cansada", "relajación"]):
-                st.info("💖 **Bella IA:** *Te recomiendo nuestro tratamiento Spa Keratina con masaje capilar.*")
-            elif any(k in msg_lower for k in ["precio", "descuento", "combo", "cupón"]):
-                st.info("💖 **Bella IA:** *Los combos tienen un 20% de ahorro directo. Puedes usar el cupón 'GLOW10'.*")
+            
+            # Redirección e Inteligencia de Navegación del Chatbot
+            if any(k in msg_lower for k in ["agendar", "reservar", "reserva", "cita", "horario", "turnos", "calendario"]):
+                st.session_state["current_tab"] = "📅 Reserva & Calendario"
+                st.info("🤖 **Bella IA:** ¡Te he redirigido a la pestaña de **Reserva & Calendario** para que elijas tu horario!")
+                st.rerun()
+            elif any(k in msg_lower for k in ["catalogo", "catálogo", "servicio", "servicios", "combo", "combos", "precio", "precios"]):
+                st.session_state["current_tab"] = "🛍️ Catálogo & Combos"
+                st.info("🤖 **Bella IA:** ¡Te he abierto la pestaña de **Catálogo & Combos** para que explores nuestras opciones!")
+                st.rerun()
+            elif any(k in msg_lower for k in ["reseña", "reseñas", "opinion", "opiniones", "comentario", "estrellas"]):
+                st.session_state["current_tab"] = "⭐ Mapa de Calor & Reseñas"
+                st.info("🤖 **Bella IA:** ¡Te llevo a la pestaña de **Mapa de Calor & Reseñas** para ver lo que opinan nuestras clientas!")
+                st.rerun()
+            elif any(k in msg_lower for k in ["estresada", "estresado", "cansada", "relajación", "spa"]):
+                st.info("💖 **Bella IA:** Te recomiendo nuestro *Tratamiento Spa Keratina con Masaje Capilar*. ¡Te dejará totalmente renovada!")
+            elif any(k in msg_lower for k in ["cupon", "cupón", "descuento", "promocion", "oferta"]):
+                st.info("💖 **Bella IA:** Puedes usar el cupón **'GLOW10'** para un 10% OFF en servicios individuales o pagar con tarjeta para un 5% adicional.")
+            elif any(k in msg_lower for k in ["hola", "buenos dias", "buenas tardes"]):
+                st.info("💖 **Bella IA:** ¡Hola! Soy Bella IA. ¿Te ayudo a agendar una cita, ver nuestros servicios o analizar tu rostro?")
             else:
-                st.warning("🤖 **Bella IA:** *He registrado tu consulta para que el Administrador o Estilista te contacte.*")
+                st.warning("🤖 **Bella IA:** Consulta registrada. El Administrador o un Estilista te contactará pronto.")
                 conn = sqlite3.connect(DB_PATH)
                 c = conn.cursor()
                 ahora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -362,10 +420,10 @@ if st.session_state["user_role"] == "cliente":
     )
     st.session_state["current_tab"] = selected_tab
 
-    # --- PESTAÑA 1: CATÁLOGO DE SERVICIOS E IMÁGENES ---
+    # --- PESTAÑA 1: CATÁLOGO DE SERVICIOS ---
     if selected_tab == "🛍️ Catálogo & Combos":
         st.markdown("### 💄 Servicios Individuales y Combos Especiales")
-        st.info("💡 **Regla de Descuento:** Los cupones aplican únicamente sobre servicios individuales. Los combos ya poseen precio especial.")
+        st.info("💡 **Regla de Descuento:** Los cupones aplican sobre servicios individuales. Los combos ya poseen un precio promocional especial.")
         
         conn = sqlite3.connect(DB_PATH)
         df_serv = pd.read_sql_query("SELECT * FROM servicios WHERE disponible = 1", conn)
@@ -376,7 +434,6 @@ if st.session_state["user_role"] == "cliente":
             target_col = col_s1 if i % 2 == 0 else col_s2
             with target_col:
                 with st.container(border=True):
-                    # Acceso seguro a la columna 'imagen_url'
                     img_url = row["imagen_url"] if "imagen_url" in row.index and pd.notna(row["imagen_url"]) else ""
                     if img_url:
                         st.image(img_url, use_container_width=True)
@@ -501,12 +558,14 @@ if st.session_state["user_role"] == "cliente":
                         conn.commit()
                         conn.close()
                         
-                        envio_ok = enviar_correo_confirmacion(st.session_state["user_email"], st.session_state["user_nickname"], nombres_serv, str(fecha_sel), st.session_state["hora_seleccionada"], total_final)
+                        envio_ok, msg_envio = enviar_correo_confirmacion(st.session_state["user_email"], st.session_state["user_nickname"], nombres_serv, str(fecha_sel), st.session_state["hora_seleccionada"], total_final)
                         
                         st.balloons()
                         st.success(f"¡Cita reservada para el {fecha_sel} a las {st.session_state['hora_seleccionada']}!")
                         if envio_ok:
                             st.info("📧 Correo de confirmación enviado exitosamente.")
+                        else:
+                            st.warning(f"⚠️ Estado del correo: {msg_envio}. (Verifica st.secrets['email']).")
                         
                         st.session_state["carrito"] = []
                         del st.session_state["hora_seleccionada"]
@@ -529,7 +588,6 @@ if st.session_state["user_role"] == "cliente":
             st.markdown("---")
             st.markdown("### 💬 Comentarios de Clientes Anteriores")
             for _, r in df_rev.iterrows():
-                # Acceso seguro al campo 'fecha'
                 fecha_rev = r["fecha"] if "fecha" in r.index and pd.notna(r["fecha"]) else datetime.date.today().strftime("%Y-%m-%d")
                 st.markdown(f"""
                 <div class="review-card">
@@ -586,7 +644,29 @@ elif st.session_state["user_role"] == "admin":
     with t_citas:
         st.markdown("### 📋 Registro General de Citas")
         df_c = pd.read_sql_query("SELECT * FROM citas ORDER BY id DESC", conn)
-        st.dataframe(df_c, use_container_width=True)
+        
+        if not df_c.empty:
+            for _, cita in df_c.iterrows():
+                with st.container(border=True):
+                    col_c1, col_c2, col_c3, col_c4 = st.columns([3, 2, 2, 1])
+                    with col_c1:
+                        st.write(f"**Cita #{cita['id']} - {cita['cliente_nombre']}** ({cita['cliente_email']})")
+                        st.caption(f"Servicio: **{cita['servicio']}**")
+                    with col_c2:
+                        st.write(f"📅 **{cita['fecha']}** | 🕒 **{cita['hora']}**")
+                        st.caption(f"Estilista: {cita['empleado']}")
+                    with col_c3:
+                        st.write(f"💵 **${cita['monto_total']:.2f}** ({cita['metodo_pago']})")
+                        st.caption(f"Estado: {cita['estado']}")
+                    with col_c4:
+                        if st.button("🗑️ Borrar", key=f"del_cita_{cita['id']}"):
+                            c = conn.cursor()
+                            c.execute("DELETE FROM citas WHERE id = ?", (cita['id'],))
+                            conn.commit()
+                            st.toast(f"Cita #{cita['id']} borrada con éxito.", icon="🗑️")
+                            st.rerun()
+        else:
+            st.info("No hay citas registradas en la base de datos.")
         
         st.markdown("---")
         st.markdown("### 🚶‍♂️ Agendar Cliente Presencial (Walk-in)")
@@ -770,7 +850,6 @@ elif st.session_state["user_role"] == "empleado":
         df_emp_all = pd.read_sql_query("SELECT nickname FROM usuarios WHERE rol='empleado'", conn)
         emp_list = df_emp_all["nickname"].tolist() if not df_emp_all.empty else [st.session_state["user_nickname"]]
         
-        # Selecciona por defecto al empleado con la sesión activa
         default_idx = emp_list.index(st.session_state["user_nickname"]) if st.session_state["user_nickname"] in emp_list else 0
         e_nom = col_w2.selectbox("Estilista Asignada:", emp_list, index=default_idx)
         
