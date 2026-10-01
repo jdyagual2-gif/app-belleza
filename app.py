@@ -245,7 +245,6 @@ def enviar_correo_confirmacion(destinatario, nombre, servicio, fecha, hora, tota
         return False, str(e)
 
 def analizar_rostro_ia(img_file):
-    """Analiza dinámicamente la imagen para determinar el tipo de rostro real"""
     try:
         img = Image.open(img_file)
         w, h = img.size
@@ -287,7 +286,7 @@ def check_toxic_comment(texto):
     return any(word in texto.lower() for word in palabras_prohibidas)
 
 # ==========================================
-# 4. CONTROL DE SESIÓN Y LOGIN (RBAC)
+# 4. CONTROL DE SESIÓN Y LOGIN (REGISTRO BD)
 # ==========================================
 if "user_email" not in st.session_state:
     st.session_state["user_email"] = ""
@@ -309,7 +308,7 @@ if not st.session_state["user_email"]:
         with st.container(border=True):
             nickname_in = st.text_input("Apodo / Nombre (Nickname):")
             email_in = st.text_input("Correo Electrónico:").strip().lower()
-            btn_login = st.button("Iniciar Sesión / Entrar", use_container_width=True)
+            btn_login = st.button("Iniciar Sesión / Registrarme", use_container_width=True)
             
             if btn_login:
                 if not email_in or not nickname_in:
@@ -323,21 +322,25 @@ if not st.session_state["user_email"]:
                     c = conn.cursor()
                     c.execute("SELECT rol FROM usuarios WHERE LOWER(email) = ?", (email_in,))
                     res = c.fetchone()
-                    conn.close()
                     
                     if email_in == super_admin.lower():
                         st.session_state["user_role"] = "admin"
+                        c.execute("INSERT OR REPLACE INTO usuarios (email, nickname, rol, cedula, estado_pago, foto_url) VALUES (?, ?, 'admin', '0000000000', 'Al Día', '')", (email_in, nickname_in))
                     elif res and res[0] == "empleado":
                         st.session_state["user_role"] = "empleado"
                     elif res and res[0] == "admin":
                         st.session_state["user_role"] = "admin"
                     else:
                         st.session_state["user_role"] = "cliente"
+                        # GUARDA/REGISTRA EL CLIENTE NUEVO EN LA BASE DE DATOS AUTOMÁTICAMENTE
+                        c.execute("INSERT OR REPLACE INTO usuarios (email, nickname, rol, cedula, estado_pago, foto_url) VALUES (?, ?, 'cliente', '0000000000', 'Al Día', '')", (email_in, nickname_in))
                     
+                    conn.commit()
+                    conn.close()
                     st.rerun()
     st.stop()
 
-# --- SIDEBAR (CHATBOT CON IA INTELIGENTE Y NAVEGACIÓN) ---
+# --- SIDEBAR (CHATBOT CON IA INTELIGENTE) ---
 st.sidebar.markdown(f"### 👤 {st.session_state['user_nickname']}")
 role_class = f"role-{st.session_state['user_role']}"
 st.sidebar.markdown(f'<span class="role-badge {role_class}">Rol: {st.session_state["user_role"].upper()}</span>', unsafe_allow_html=True)
@@ -357,7 +360,6 @@ with st.sidebar.expander("💖 Bella IA & Visagismo (Asistente 24/7)", expanded=
     if img_file:
         image = Image.open(img_file)
         st.image(image, use_container_width=True, caption="Rostro Cargado para Análisis")
-        
         forma_detectada, recom_text = analizar_rostro_ia(img_file)
         st.success(f"✨ **Visagismo IA:** Rostro **{forma_detectada}** detectado.\n\n💡 {recom_text}")
 
@@ -367,25 +369,30 @@ with st.sidebar.expander("💖 Bella IA & Visagismo (Asistente 24/7)", expanded=
         if user_msg:
             msg_lower = user_msg.lower()
             
-            # Redirección e Inteligencia de Navegación del Chatbot
-            if any(k in msg_lower for k in ["agendar", "reservar", "reserva", "cita", "horario", "turnos", "calendario"]):
+            # Reconocimiento ampliado de intenciones IA
+            if any(k in msg_lower for k in ["crear cliente", "nuevo cliente", "registrar cliente", "crear empleado", "nuevo empleado", "registrar empleado"]):
+                if st.session_state["user_role"] == "admin":
+                    st.info("🤖 **Bella IA:** Para crear nuevos empleados o registrar clientes manualmente, dirígete a la pestaña **'👥 Usuarios & Empleados'** en tu panel Admin.")
+                else:
+                    st.info("🤖 **Bella IA:** Los nuevos clientes quedan registrados automáticamente al iniciar sesión. Para unirte al equipo de personal, contacta al Administrador.")
+            elif any(k in msg_lower for k in ["agendar", "reservar", "reserva", "cita", "horario", "turnos", "calendario"]):
                 st.session_state["current_tab"] = "📅 Reserva & Calendario"
-                st.info("🤖 **Bella IA:** ¡Te he redirigido a la pestaña de **Reserva & Calendario** para que elijas tu horario!")
+                st.info("🤖 **Bella IA:** ¡Te he redirigido a la pestaña de **Reserva & Calendario**!")
                 st.rerun()
             elif any(k in msg_lower for k in ["catalogo", "catálogo", "servicio", "servicios", "combo", "combos", "precio", "precios"]):
                 st.session_state["current_tab"] = "🛍️ Catálogo & Combos"
-                st.info("🤖 **Bella IA:** ¡Te he abierto la pestaña de **Catálogo & Combos** para que explores nuestras opciones!")
+                st.info("🤖 **Bella IA:** ¡Te he abierto el **Catálogo & Combos**!")
                 st.rerun()
             elif any(k in msg_lower for k in ["reseña", "reseñas", "opinion", "opiniones", "comentario", "estrellas"]):
                 st.session_state["current_tab"] = "⭐ Mapa de Calor & Reseñas"
-                st.info("🤖 **Bella IA:** ¡Te llevo a la pestaña de **Mapa de Calor & Reseñas** para ver lo que opinan nuestras clientas!")
+                st.info("🤖 **Bella IA:** ¡Te llevo a la sección de **Reseñas**!")
                 st.rerun()
             elif any(k in msg_lower for k in ["estresada", "estresado", "cansada", "relajación", "spa"]):
-                st.info("💖 **Bella IA:** Te recomiendo nuestro *Tratamiento Spa Keratina con Masaje Capilar*. ¡Te dejará totalmente renovada!")
+                st.info("💖 **Bella IA:** Te recomiendo nuestro *Tratamiento Spa Keratina con Masaje Capilar*.")
             elif any(k in msg_lower for k in ["cupon", "cupón", "descuento", "promocion", "oferta"]):
-                st.info("💖 **Bella IA:** Puedes usar el cupón **'GLOW10'** para un 10% OFF en servicios individuales o pagar con tarjeta para un 5% adicional.")
+                st.info("💖 **Bella IA:** Puedes usar el cupón **'GLOW10'** para un 10% OFF en servicios individuales.")
             elif any(k in msg_lower for k in ["hola", "buenos dias", "buenas tardes"]):
-                st.info("💖 **Bella IA:** ¡Hola! Soy Bella IA. ¿Te ayudo a agendar una cita, ver nuestros servicios o analizar tu rostro?")
+                st.info("💖 **Bella IA:** ¡Hola! Soy Bella IA. ¿En qué puedo ayudarte hoy?")
             else:
                 st.warning("🤖 **Bella IA:** Consulta registrada. El Administrador o un Estilista te contactará pronto.")
                 conn = sqlite3.connect(DB_PATH)
@@ -420,7 +427,6 @@ if st.session_state["user_role"] == "cliente":
     )
     st.session_state["current_tab"] = selected_tab
 
-    # --- PESTAÑA 1: CATÁLOGO DE SERVICIOS ---
     if selected_tab == "🛍️ Catálogo & Combos":
         st.markdown("### 💄 Servicios Individuales y Combos Especiales")
         st.info("💡 **Regla de Descuento:** Los cupones aplican sobre servicios individuales. Los combos ya poseen un precio promocional especial.")
@@ -455,7 +461,6 @@ if st.session_state["user_role"] == "cliente":
                         st.toast(f"¡{row['nombre']} agregado al carrito!", icon="🛒")
                         st.rerun()
 
-    # --- PESTAÑA 2: CALENDARIO DE RESERVA & CHECKOUT ---
     elif selected_tab == "📅 Reserva & Calendario":
         col_res1, col_res2 = st.columns([1.3, 1])
         
@@ -565,12 +570,11 @@ if st.session_state["user_role"] == "cliente":
                         if envio_ok:
                             st.info("📧 Correo de confirmación enviado exitosamente.")
                         else:
-                            st.warning(f"⚠️ Estado del correo: {msg_envio}. (Verifica st.secrets['email']).")
+                            st.warning(f"⚠️ Estado del correo: {msg_envio}.")
                         
                         st.session_state["carrito"] = []
                         del st.session_state["hora_seleccionada"]
 
-    # --- PESTAÑA 3: MAPA DE CALOR & RESEÑAS PÚBLICAS ---
     elif selected_tab == "⭐ Mapa de Calor & Reseñas":
         st.markdown("### 📊 Promedio de Satisfacción & Opiniones")
         
@@ -618,7 +622,7 @@ if st.session_state["user_role"] == "cliente":
                               (st.session_state["user_nickname"], emp_resena, estrellas_in, comentario_in, 1 if es_toxico else 0, hoy_f))
                     conn.commit()
                     if es_toxico:
-                        st.warning("⚠️ Tu reseña requiere aprobación del Administrador debido a políticas de moderación.")
+                        st.warning("⚠️ Tu reseña requiere aprobación del Administrador.")
                     else:
                         st.success("¡Reseña registrada con éxito!")
                     st.rerun()
@@ -632,7 +636,7 @@ elif st.session_state["user_role"] == "admin":
     
     t_citas, t_emp, t_serv, t_mod, t_inv, t_bot = st.tabs([
         "📅 Citas & Walk-ins",
-        "👩‍🎨 Gestión Empleados",
+        "👥 Usuarios & Empleados",
         "🛠️ Catálogo Servicios",
         "🛡️ Moderación Reseñas",
         "📊 Finanzas e Inventario",
@@ -690,29 +694,54 @@ elif st.session_state["user_role"] == "admin":
                 st.success("¡Walk-in registrado exitosamente!")
                 st.rerun()
 
-    # --- TAB 2: GESTIÓN EMPLEADOS ---
+    # --- TAB 2: GESTIÓN EMPLEADOS Y CLIENTES (CORREGIDO Y AMPLIALO) ---
     with t_emp:
-        st.markdown("### 👩‍🎨 Personal y Estilistas")
-        df_emp = pd.read_sql_query("SELECT email, nickname, cedula, estado_pago, foto_url FROM usuarios WHERE rol = 'empleado'", conn)
-        st.dataframe(df_emp, use_container_width=True)
+        st.markdown("### 👥 Gestión Integral de Usuarios")
+        
+        tab_u1, tab_u2 = st.tabs(["👩‍🎨 Empleados / Estilistas", "👤 Clientes Registrados"])
+        
+        with tab_u1:
+            df_emp = pd.read_sql_query("SELECT email, nickname, cedula, estado_pago, foto_url FROM usuarios WHERE rol = 'empleado'", conn)
+            st.dataframe(df_emp, use_container_width=True)
 
-        st.markdown("#### ➕ Registrar Nuevo Empleado")
-        with st.form("form_add_emp"):
-            e_email = st.text_input("Correo Electrónico:")
-            e_nick = st.text_input("Nombre / Apodo Profesional:")
-            e_cedula = st.text_input("Cédula / Identificación:")
-            e_foto = st.text_input("URL Foto de Perfil (Unsplash, etc.):", value="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400")
-            
-            if st.form_submit_button("Guardar Empleado"):
-                if e_email and e_nick:
-                    c = conn.cursor()
-                    c.execute("INSERT OR REPLACE INTO usuarios (email, nickname, rol, cedula, estado_pago, foto_url) VALUES (?, ?, 'empleado', ?, 'Al Día', ?)",
-                              (e_email.lower(), e_nick, e_cedula, e_foto))
-                    conn.commit()
-                    st.success(f"Empleado '{e_nick}' registrado correctamente.")
-                    st.rerun()
-                else:
-                    st.warning("Ingresa email y apodo.")
+            st.markdown("#### ➕ Registrar o Actualizar Empleado")
+            with st.form("form_add_emp"):
+                e_email = st.text_input("Correo Electrónico del Empleado:").strip().lower()
+                e_nick = st.text_input("Nombre / Apodo Profesional:")
+                e_cedula = st.text_input("Cédula / Identificación:")
+                e_foto = st.text_input("URL Foto de Perfil:", value="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400")
+                
+                if st.form_submit_button("Guardar Empleado"):
+                    if e_email and e_nick:
+                        c = conn.cursor()
+                        c.execute("INSERT OR REPLACE INTO usuarios (email, nickname, rol, cedula, estado_pago, foto_url) VALUES (?, ?, 'empleado', ?, 'Al Día', ?)",
+                                  (e_email, e_nick, e_cedula, e_foto))
+                        conn.commit()
+                        st.success(f"✅ Empleado '{e_nick}' registrado/actualizado en la base de datos.")
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ Ingresa correo y nickname obligatoriamente.")
+
+        with tab_u2:
+            df_cli = pd.read_sql_query("SELECT email, nickname, cedula, estado_pago FROM usuarios WHERE rol = 'cliente'", conn)
+            st.dataframe(df_cli, use_container_width=True)
+
+            st.markdown("#### ➕ Registrar Cliente Manualmente")
+            with st.form("form_add_cli"):
+                c_email = st.text_input("Correo del Cliente:").strip().lower()
+                c_nick = st.text_input("Nombre / Apodo del Cliente:")
+                c_cedula = st.text_input("Cédula / Teléfono:", value="0000000000")
+                
+                if st.form_submit_button("Guardar Cliente"):
+                    if c_email and c_nick:
+                        c = conn.cursor()
+                        c.execute("INSERT OR REPLACE INTO usuarios (email, nickname, rol, cedula, estado_pago, foto_url) VALUES (?, ?, 'cliente', ?, 'Al Día', '')",
+                                  (c_email, c_nick, c_cedula))
+                        conn.commit()
+                        st.success(f"✅ Cliente '{c_nick}' guardado en la base de datos.")
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ Ingresa correo y nombre.")
 
     # --- TAB 3: CATÁLOGO SERVICIOS ---
     with t_serv:
@@ -783,7 +812,7 @@ elif st.session_state["user_role"] == "admin":
                         st.info("Reseña eliminada.")
                         st.rerun()
         else:
-            st.success("🎉 No hay reseñas pendientes de moderación por lenguaje inapropiado.")
+            st.success("🎉 No hay reseñas pendientes de moderación.")
 
     # --- TAB 5: FINANZAS E INVENTARIO ---
     with t_inv:
