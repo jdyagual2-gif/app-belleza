@@ -641,246 +641,268 @@ elif st.session_state["user_role"] == "admin":
     
     conn = sqlite3.connect(DB_PATH)
     
+    # --- TAB 1: CITAS & WALK-INS ---
     with t_citas:
         st.markdown("### 📋 Registro General de Citas")
         df_c = pd.read_sql_query("SELECT * FROM citas ORDER BY id DESC", conn)
         
         if not df_c.empty:
-            for _, cita in df_c.iterrows():
-                with st.container(border=True):
-                    col_c1, col_c2, col_c3, col_c4 = st.columns([3, 2, 2, 1])
-                    with col_c1:
-                        st.write(f"**Cita #{cita['id']} - {cita['cliente_nombre']}** ({cita['cliente_email']})")
-                        st.caption(f"Servicio: **{cita['servicio']}**")
-                    with col_c2:
-                        st.write(f"📅 **{cita['fecha']}** | 🕒 **{cita['hora']}**")
-                        st.caption(f"Estilista: {cita['empleado']}")
-                    with col_c3:
-                        st.write(f"💵 **${cita['monto_total']:.2f}** ({cita['metodo_pago']})")
-                        st.caption(f"Estado: {cita['estado']}")
-                    with col_c4:
-                        if st.button("🗑️ Borrar", key=f"del_cita_{cita['id']}"):
-                            c = conn.cursor()
-                            c.execute("DELETE FROM citas WHERE id = ?", (cita['id'],))
-                            conn.commit()
-                            st.toast(f"Cita #{cita['id']} borrada con éxito.", icon="🗑️")
-                            st.rerun()
+            st.dataframe(df_c, use_container_width=True)
+            
+            st.markdown("#### Cambiar Estado de Cita")
+            col_c1, col_c2, col_c3 = st.columns([1, 1, 1])
+            cita_id = col_c1.selectbox("Selecciona ID de Cita:", df_c["id"].tolist())
+            nuevo_estado = col_c2.selectbox("Nuevo Estado:", ["Confirmada", "Atendida", "Cancelada"])
+            if col_c3.button("Actualizar Estado"):
+                c = conn.cursor()
+                c.execute("UPDATE citas SET estado = ? WHERE id = ?", (nuevo_estado, cita_id))
+                conn.commit()
+                st.success(f"Cita #{cita_id} actualizada a '{nuevo_estado}'")
+                st.rerun()
         else:
-            st.info("No hay citas registradas en la base de datos.")
-        
+            st.info("No hay citas registradas.")
+
         st.markdown("---")
-        st.markdown("### 🚶‍♂️ Agendar Cliente Presencial (Walk-in)")
+        st.markdown("### 🚶 Registro Manual de Walk-in (Atención Presencial)")
         with st.form("form_walkin"):
-            col_w1, col_w2 = st.columns(2)
-            c_nom = col_w1.text_input("Nombre del Cliente:")
-            c_email = col_w2.text_input("Correo Electrónico del Cliente:")
+            w_nombre = st.text_input("Nombre del Cliente:")
+            w_email = st.text_input("Correo (Opcional):", value="walkin@glowstudio.ai")
             
-            df_serv_all = pd.read_sql_query("SELECT nombre, precio FROM servicios WHERE disponible=1", conn)
-            s_nom = col_w1.selectbox("Servicio / Combo:", df_serv_all["nombre"].tolist() if not df_serv_all.empty else ["Balayage Neón"])
+            df_e = pd.read_sql_query("SELECT nickname FROM usuarios WHERE rol = 'empleado'", conn)
+            lista_emp = df_e["nickname"].tolist() if not df_e.empty else ["Valeria (Master Colorista)"]
+            w_emp = st.selectbox("Estilista Asignado:", lista_emp)
             
-            df_emp_all = pd.read_sql_query("SELECT nickname FROM usuarios WHERE rol='empleado'", conn)
-            e_nom = col_w2.selectbox("Estilista Asignada:", df_emp_all["nickname"].tolist() if not df_emp_all.empty else ["Valeria (Master Colorista)"])
+            df_s = pd.read_sql_query("SELECT nombre, precio FROM servicios WHERE disponible = 1", conn)
+            w_serv = st.selectbox("Servicio Solicitado:", df_s["nombre"].tolist() if not df_s.empty else ["Corte & Visagismo"])
+            precio_s = df_s[df_s["nombre"] == w_serv]["precio"].values[0] if not df_s.empty else 45.0
             
-            w_fecha = col_w1.date_input("Fecha:", value=datetime.date.today())
-            w_hora = col_w2.selectbox("Hora:", ["09:00", "10:30", "12:00", "14:00", "15:30", "17:00"])
+            w_fecha = st.date_input("Fecha:", value=datetime.date.today())
+            w_hora = st.time_input("Hora:", value=datetime.time(10, 0)).strftime("%H:%M")
+            w_monto = st.number_input("Monto Cobrado ($):", value=float(precio_s))
+            w_metodo = st.selectbox("Método de Pago:", ["Efectivo", "Tarjeta"])
             
-            monto_val = df_serv_all[df_serv_all["nombre"] == s_nom]["precio"].values[0] if not df_serv_all.empty else 50.0
-            
-            btn_walkin = st.form_submit_button("Registrar Cita Walk-in")
-            if btn_walkin:
+            if st.form_submit_button("➕ Registrar Walk-in"):
                 c = conn.cursor()
                 c.execute("""INSERT INTO citas (cliente_email, cliente_nombre, empleado, servicio, fecha, hora, metodo_pago, monto_total, estado)
-                             VALUES (?, ?, ?, ?, ?, ?, 'Efectivo Walk-in', ?, 'Confirmada')""",
-                          (c_email, c_nom, e_nom, s_nom, str(w_fecha), w_hora, monto_val))
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                          (w_email, w_nombre, w_emp, w_serv, str(w_fecha), w_hora, w_metodo, w_monto, "Atendida"))
                 conn.commit()
-                st.success("¡Cita presencial registrada con éxito!")
+                st.success("¡Walk-in registrado exitosamente!")
                 st.rerun()
 
+    # --- TAB 2: GESTIÓN EMPLEADOS ---
     with t_emp:
-        st.markdown("### 👩‍🎨 Lista de Empleados")
-        df_e = pd.read_sql_query("SELECT email, nickname, cedula, estado_pago, foto_url FROM usuarios WHERE rol = 'empleado'", conn)
-        st.dataframe(df_e, use_container_width=True)
-        
-        st.markdown("---")
-        st.markdown("### ➕ Registrar Nuevo Empleado")
+        st.markdown("### 👩‍🎨 Personal y Estilistas")
+        df_emp = pd.read_sql_query("SELECT email, nickname, cedula, estado_pago, foto_url FROM usuarios WHERE rol = 'empleado'", conn)
+        st.dataframe(df_emp, use_container_width=True)
+
+        st.markdown("#### ➕ Registrar Nuevo Empleado")
         with st.form("form_add_emp"):
-            new_emp_email = st.text_input("Correo Electrónico:")
-            new_emp_nick = st.text_input("Nombre y Cargo (Ej: Sofía - Master Barber):")
-            new_emp_ced = st.text_input("Cédula:")
-            new_emp_foto = st.text_input("URL de Foto de Perfil:")
-            btn_add_e = st.form_submit_button("Guardar Empleado")
+            e_email = st.text_input("Correo Electrónico:")
+            e_nick = st.text_input("Nombre / Apodo Profesional:")
+            e_cedula = st.text_input("Cédula / Identificación:")
+            e_foto = st.text_input("URL Foto de Perfil (Unsplash, etc.):", value="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400")
             
-            if btn_add_e:
-                if new_emp_email and new_emp_nick:
+            if st.form_submit_button("Guardar Empleado"):
+                if e_email and e_nick:
                     c = conn.cursor()
-                    c.execute("INSERT OR REPLACE INTO usuarios VALUES (?, ?, 'empleado', ?, 'Al Día', ?)",
-                              (new_emp_email.strip().lower(), new_emp_nick, new_emp_ced, new_emp_foto))
+                    c.execute("INSERT OR REPLACE INTO usuarios (email, nickname, rol, cedula, estado_pago, foto_url) VALUES (?, ?, 'empleado', ?, 'Al Día', ?)",
+                              (e_email.lower(), e_nick, e_cedula, e_foto))
                     conn.commit()
-                    st.success("Empleado registrado correctamente.")
+                    st.success(f"Empleado '{e_nick}' registrado correctamente.")
                     st.rerun()
-
-    with t_serv:
-        st.markdown("### 🛠️ Control de Servicios y Disponibilidad")
-        df_s = pd.read_sql_query("SELECT * FROM servicios", conn)
-        for _, row in df_s.iterrows():
-            col_s1, col_s2, col_s3 = st.columns([2, 1, 1])
-            col_s1.write(f"**{row['nombre']}** ({row['categoria']}) - ${row['precio']:.2f}")
-            disp = col_s2.toggle("Disponible", value=bool(row['disponible']), key=f"sw_{row['id']}")
-            if disp != bool(row['disponible']):
-                c = conn.cursor()
-                c.execute("UPDATE servicios SET disponible = ? WHERE id = ?", (1 if disp else 0, row['id']))
-                conn.commit()
-                st.rerun()
-            if col_s3.button("Eliminar", key=f"del_serv_{row['id']}"):
-                c = conn.cursor()
-                c.execute("DELETE FROM servicios WHERE id = ?", (row['id'],))
-                conn.commit()
-                st.rerun()
-
-        st.markdown("---")
-        st.markdown("### ➕ Agregar Nuevo Servicio o Combo")
-        with st.form("form_add_serv"):
-            ns_nom = st.text_input("Nombre del Servicio:")
-            ns_cat = st.selectbox("Categoría:", ["Colorimetría", "Maquillaje", "Uñas", "Corte", "Capilar", "Combos"])
-            ns_prec = st.number_input("Precio ($ USD):", min_value=5.0, value=50.0)
-            ns_combo = st.checkbox("¿Es un Combo Especial?")
-            ns_img = st.text_input("URL de la Imagen:")
-            btn_add_s = st.form_submit_button("Guardar Servicio")
-            
-            if btn_add_s:
-                if ns_nom:
-                    c = conn.cursor()
-                    c.execute("INSERT INTO servicios (nombre, categoria, precio, disponible, es_combo, imagen_url) VALUES (?, ?, ?, 1, ?, ?)",
-                              (ns_nom, ns_cat, ns_prec, 1 if ns_combo else 0, ns_img))
-                    conn.commit()
-                    st.success("¡Servicio añadido al catálogo!")
-                    st.rerun()
-
-    with t_mod:
-        st.markdown("### 🛡️ Centro de Moderación")
-        df_r = pd.read_sql_query("SELECT * FROM resenas", conn)
-        for _, row in df_r.iterrows():
-            col_m1, col_m2 = st.columns([3, 1])
-            with col_m1:
-                st.write(f"**Cliente:** {row['cliente_nombre']} | **Estilista:** {row['empleado']} | **Estrellas:** {row['estrellas']}")
-                st.write(f"*'{row['comentario']}'*")
-            with col_m2:
-                if row['bloqueado']:
-                    st.error("🚫 Bloqueado")
-                    if st.button("Aprobar / Liberar", key=f"unblk_{row['id']}"):
-                        c = conn.cursor()
-                        c.execute("UPDATE resenas SET bloqueado = 0 WHERE id = ?", (row['id'],))
-                        conn.commit()
-                        st.rerun()
                 else:
-                    st.success("✅ Público")
-                if st.button("Eliminar Reseña", key=f"del_rev_{row['id']}"):
-                    c = conn.cursor()
-                    c.execute("DELETE FROM resenas WHERE id = ?", (row['id'],))
-                    conn.commit()
-                    st.rerun()
-            st.markdown("---")
+                    st.warning("Ingresa email y apodo.")
 
+    # --- TAB 3: CATÁLOGO SERVICIOS ---
+    with t_serv:
+        st.markdown("### 🛠️ Administración de Catálogo & Combos")
+        df_s_all = pd.read_sql_query("SELECT * FROM servicios", conn)
+        st.dataframe(df_s_all, use_container_width=True)
+
+        col_serv_l, col_serv_r = st.columns(2)
+        with col_serv_l:
+            st.markdown("#### ➕ Añadir Servicio o Combo")
+            with st.form("form_add_serv"):
+                s_nombre = st.text_input("Nombre del Servicio/Combo:")
+                s_cat = st.selectbox("Categoría:", ["Colorimetría", "Maquillaje", "Uñas", "Corte", "Capilar", "Combos"])
+                s_precio = st.number_input("Precio ($):", min_value=0.0, value=50.0)
+                s_combo = st.checkbox("¿Es un Combo Especial?")
+                s_img = st.text_input("URL de Imagen:", value="https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=600")
+                
+                if st.form_submit_button("Crear Servicio"):
+                    if s_nombre:
+                        c = conn.cursor()
+                        c.execute("INSERT INTO servicios (nombre, categoria, precio, disponible, es_combo, imagen_url) VALUES (?, ?, ?, 1, ?, ?)",
+                                  (s_nombre, s_cat, s_precio, 1 if s_combo else 0, s_img))
+                        conn.commit()
+                        st.success(f"Servicio '{s_nombre}' añadido.")
+                        st.rerun()
+
+        with col_serv_r:
+            st.markdown("#### 🔄 Cambiar Disponibilidad / Eliminar")
+            if not df_s_all.empty:
+                s_id_sel = st.selectbox("Selecciona ID de Servicio:", df_s_all["id"].tolist())
+                col_b1, col_b2 = st.columns(2)
+                if col_b1.button("Toggle Disponibilidad"):
+                    c = conn.cursor()
+                    c.execute("UPDATE servicios SET disponible = CASE WHEN disponible = 1 THEN 0 ELSE 1 END WHERE id = ?", (s_id_sel,))
+                    conn.commit()
+                    st.success("Estado de disponibilidad cambiado.")
+                    st.rerun()
+                if col_b2.button("🗑️ Eliminar Servicio"):
+                    c = conn.cursor()
+                    c.execute("DELETE FROM servicios WHERE id = ?", (s_id_sel,))
+                    conn.commit()
+                    st.warning("Servicio eliminado.")
+                    st.rerun()
+
+    # --- TAB 4: MODERACIÓN RESEÑAS ---
+    with t_mod:
+        st.markdown("### 🛡️ Reseñas Bloqueadas / Moderadas")
+        df_rev_blocked = pd.read_sql_query("SELECT * FROM resenas WHERE bloqueado = 1", conn)
+        
+        if not df_rev_blocked.empty:
+            for _, rb in df_rev_blocked.iterrows():
+                with st.container(border=True):
+                    st.write(f"**ID:** {rb['id']} | **Cliente:** {rb['cliente_nombre']} | **Estilista:** {rb['empleado']}")
+                    st.write(f"**Estrellas:** {'⭐'*int(rb['estrellas'])}")
+                    st.write(f"**Comentario detectado:** {rb['comentario']}")
+                    
+                    col_m1, col_m2 = st.columns(2)
+                    if col_m1.button("✅ Aprobar Reseña", key=f"app_{rb['id']}"):
+                        c = conn.cursor()
+                        c.execute("UPDATE resenas SET bloqueado = 0 WHERE id = ?", (rb['id'],))
+                        conn.commit()
+                        st.success("Reseña aprobada.")
+                        st.rerun()
+                    if col_m2.button("🗑️ Eliminar Definitivamente", key=f"del_rev_{rb['id']}"):
+                        c = conn.cursor()
+                        c.execute("DELETE FROM resenas WHERE id = ?", (rb['id'],))
+                        conn.commit()
+                        st.info("Reseña eliminada.")
+                        st.rerun()
+        else:
+            st.success("🎉 No hay reseñas pendientes de moderación por lenguaje inapropiado.")
+
+    # --- TAB 5: FINANZAS E INVENTARIO ---
     with t_inv:
-        st.markdown("### 📊 Métricas Financieras y Stock")
-        df_tot = pd.read_sql_query("SELECT SUM(monto_total) as total FROM citas WHERE estado != 'Cancelada'", conn)
-        total_rec = df_tot['total'].iloc[0] or 0.0
-        st.metric(label="Ingresos Totales Registrados", value=f"${total_rec:.2f} USD")
+        st.markdown("### 📈 Indicadores Financieros & Control de Stock")
+        
+        df_c_ok = pd.read_sql_query("SELECT monto_total FROM citas WHERE estado != 'Cancelada'", conn)
+        total_ingresos = df_c_ok["monto_total"].sum() if not df_c_ok.empty else 0.0
+        
+        col_f1, col_f2, col_f3 = st.columns(3)
+        col_f1.metric("💰 Ingresos Totales", f"${total_ingresos:.2f} USD")
+        col_f2.metric("📅 Citas Atendidas / Confirmadas", len(df_c_ok))
+        
+        df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
+        col_f3.metric("📦 Productos en Stock", len(df_inv))
         
         st.markdown("---")
-        st.markdown("### 📦 Control de Inventario de Productos")
-        df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
-        for _, row_inv in df_inv.iterrows():
-            col_i1, col_i2, col_i3 = st.columns([2, 1.5, 1])
-            col_i1.write(f"**{row_inv['producto']}** - ${row_inv['precio_unitario']:.2f}/unidad")
-            new_qty = col_i2.number_input(f"Stock ({row_inv['producto']}):", min_value=0, value=int(row_inv['cantidad']), key=f"inv_{row_inv['id']}")
-            if new_qty != row_inv['cantidad']:
-                if col_i3.button("Actualizar", key=f"upd_inv_{row_inv['id']}"):
+        st.markdown("#### 📦 Inventario de Productos")
+        st.dataframe(df_inv, use_container_width=True)
+        
+        col_i_a, col_i_b = st.columns(2)
+        with col_i_a:
+            st.markdown("##### ➕ Agregar Producto al Stock")
+            with st.form("form_add_inv"):
+                p_nombre = st.text_input("Producto:")
+                p_cant = st.number_input("Cantidad Inicial:", min_value=1, value=10)
+                p_prec = st.number_input("Precio Unitario ($):", min_value=0.0, value=15.0)
+                if st.form_submit_button("Guardar Producto"):
                     c = conn.cursor()
-                    c.execute("UPDATE inventario SET cantidad = ? WHERE id = ?", (new_qty, row_inv['id']))
+                    c.execute("INSERT INTO inventario (producto, cantidad, precio_unitario) VALUES (?, ?, ?)", (p_nombre, p_cant, p_prec))
                     conn.commit()
-                    st.success("Stock actualizado.")
+                    st.success("Producto registrado.")
                     st.rerun()
 
-    with t_bot:
-        st.markdown("### 📥 Atender Consultas Escaladas del Chatbot")
-        df_esc = pd.read_sql_query("SELECT * FROM preguntas_escaladas WHERE atendido = 0", conn)
-        if df_esc.empty:
-            st.info("No hay preguntas pendientes por responder.")
-        else:
-            for _, r_esc in df_esc.iterrows():
-                with st.container(border=True):
-                    st.write(f"**Cliente:** {r_esc['cliente_email']} | Fecha: {r_esc['fecha_hora']}")
-                    st.write(f"**Pregunta:** {r_esc['pregunta']}")
-                    resp_input = st.text_input("Escribe tu respuesta:", key=f"resp_{r_esc['id']}")
-                    if st.button("Enviar Respuesta y Cerrar", key=f"btn_resp_{r_esc['id']}"):
+        with col_i_b:
+            st.markdown("##### 🎟️ Gestión de Cupones")
+            df_coup = pd.read_sql_query("SELECT * FROM cupones", conn)
+            st.dataframe(df_coup, use_container_width=True)
+            with st.form("form_add_cupon"):
+                c_code = st.text_input("Código de Cupón:").strip().upper()
+                c_desc = st.number_input("Descuento (%):", min_value=1, max_value=100, value=15)
+                if st.form_submit_button("Crear Cupón"):
+                    if c_code:
                         c = conn.cursor()
-                        c.execute("UPDATE preguntas_escaladas SET respuesta = ?, atendido = 1 WHERE id = ?", (resp_input, r_esc['id']))
+                        c.execute("INSERT OR REPLACE INTO cupones (codigo, descuento, activo) VALUES (?, ?, 1)", (c_code, c_desc))
                         conn.commit()
-                        st.success("Respuesta registrada.")
+                        st.success(f"Cupón {c_code} guardado.")
                         st.rerun()
 
+    # --- TAB 6: CONSULTAS IA CHATBOT ---
+    with t_bot:
+        st.markdown("### 📥 Preguntas Escaladas desde Bella IA")
+        df_esc = pd.read_sql_query("SELECT * FROM preguntas_escaladas ORDER BY id DESC", conn)
+        
+        if not df_esc.empty:
+            for _, q in df_esc.iterrows():
+                estado_at = "✅ Atendido" if q["atendido"] else "🔴 Pendiente"
+                with st.expander(f"Pregunta #{q['id']} - {q['cliente_email']} ({estado_at})"):
+                    st.write(f"**Fecha/Hora:** {q['fecha_hora']}")
+                    st.write(f"**Pregunta:** {q['pregunta']}")
+                    if q["respuesta"]:
+                        st.info(f"**Respuesta enviada:** {q['respuesta']}")
+                    else:
+                        resp_in = st.text_area("Escribe tu respuesta para el cliente:", key=f"resp_{q['id']}")
+                        if st.button("Enviar Respuesta", key=f"btn_resp_{q['id']}"):
+                            c = conn.cursor()
+                            c.execute("UPDATE preguntas_escaladas SET respuesta = ?, atendido = 1 WHERE id = ?", (resp_in, q['id']))
+                            conn.commit()
+                            st.success("Respuesta guardada con éxito.")
+                            st.rerun()
+        else:
+            st.info("No hay preguntas registradas en el asistente.")
+            
     conn.close()
 
 # ==========================================
-# 7. PANEL DE EMPLEADO COMPLETO
+# 7. PANEL DE EMPLEADO (ESTILISTA)
 # ==========================================
 elif st.session_state["user_role"] == "empleado":
-    st.markdown("## ✂️ Panel de Atención para Empleados y Estilistas")
+    st.markdown(f"## 👩‍🎨 Panel de Estilista — {st.session_state['user_nickname']}")
     
     conn = sqlite3.connect(DB_PATH)
     
-    st.markdown("### 📅 Mis Citas Asignadas")
-    df_emp_citas = pd.read_sql_query("SELECT * FROM citas WHERE empleado LIKE ? ORDER BY fecha, hora", conn, params=(f"%{st.session_state['user_nickname']}%",))
-    if df_emp_citas.empty:
-        st.info("No tienes citas asignadas por el momento.")
-    else:
-        st.dataframe(df_emp_citas, use_container_width=True)
+    st.markdown("### 📅 Mis Citas Programadas")
+    df_mis_citas = pd.read_sql_query(
+        "SELECT * FROM citas WHERE empleado = ? ORDER BY fecha, hora", 
+        conn, params=(st.session_state["user_nickname"],)
+    )
+    
+    if not df_mis_citas.empty:
+        st.dataframe(df_mis_citas, use_container_width=True)
         
-    st.markdown("---")
-    st.markdown("### 🚶‍♂️ Agendar Cita Presencial / Walk-in")
-    with st.form("form_walkin_emp"):
-        col_w1, col_w2 = st.columns(2)
-        c_nom = col_w1.text_input("Nombre del Cliente:")
-        c_email = col_w2.text_input("Correo Electrónico del Cliente:")
-        
-        df_serv_all = pd.read_sql_query("SELECT nombre, precio FROM servicios WHERE disponible=1", conn)
-        s_nom = col_w1.selectbox("Servicio / Combo:", df_serv_all["nombre"].tolist() if not df_serv_all.empty else ["Balayage Neón"])
-        
-        df_emp_all = pd.read_sql_query("SELECT nickname FROM usuarios WHERE rol='empleado'", conn)
-        emp_list = df_emp_all["nickname"].tolist() if not df_emp_all.empty else [st.session_state["user_nickname"]]
-        
-        default_idx = emp_list.index(st.session_state["user_nickname"]) if st.session_state["user_nickname"] in emp_list else 0
-        e_nom = col_w2.selectbox("Estilista Asignada:", emp_list, index=default_idx)
-        
-        w_fecha = col_w1.date_input("Fecha:", value=datetime.date.today())
-        w_hora = col_w2.selectbox("Hora:", ["09:00", "10:30", "12:00", "14:00", "15:30", "17:00"])
-        
-        monto_val = df_serv_all[df_serv_all["nombre"] == s_nom]["precio"].values[0] if not df_serv_all.empty else 50.0
-        
-        btn_walkin_emp = st.form_submit_button("Registrar y Agendar Cita")
-        if btn_walkin_emp:
+        st.markdown("#### Marcar Cita como Atendida")
+        col_e1, col_e2 = st.columns([2, 1])
+        cita_emp_id = col_e1.selectbox("Selecciona ID de Cita:", df_mis_citas[df_mis_citas["estado"] == "Confirmada"]["id"].tolist() if not df_mis_citas[df_mis_citas["estado"] == "Confirmada"].empty else df_mis_citas["id"].tolist())
+        if col_e2.button("✅ Marcar Atendida"):
             c = conn.cursor()
-            c.execute("""INSERT INTO citas (cliente_email, cliente_nombre, empleado, servicio, fecha, hora, metodo_pago, monto_total, estado)
-                         VALUES (?, ?, ?, ?, ?, ?, 'Efectivo Walk-in', ?, 'Confirmada')""",
-                      (c_email, c_nom, e_nom, s_nom, str(w_fecha), w_hora, monto_val))
+            c.execute("UPDATE citas SET estado = 'Atendida' WHERE id = ?", (cita_emp_id,))
             conn.commit()
-            st.success("¡Cita agendada con éxito por el empleado!")
+            st.success(f"Cita #{cita_emp_id} completada.")
             st.rerun()
-
-    st.markdown("---")
-    st.markdown("### 💬 Consultas de Clientes Pendientes")
-    df_p = pd.read_sql_query("SELECT * FROM preguntas_escaladas WHERE atendido = 0", conn)
-    if df_p.empty:
-        st.info("Sin consultas pendientes.")
     else:
-        for _, row_p in df_p.iterrows():
-            st.write(f"**De:** {row_p['cliente_email']} - {row_p['pregunta']}")
-            ans = st.text_input("Responder:", key=f"emp_ans_{row_p['id']}")
-            if st.button("Marcar como Respondida", key=f"emp_btn_{row_p['id']}"):
-                c = conn.cursor()
-                c.execute("UPDATE preguntas_escaladas SET respuesta = ?, atendido = 1 WHERE id = ?", (ans, row_p['id']))
-                conn.commit()
-                st.success("Atendida.")
-                st.rerun()
+        st.info("No tienes citas asignadas por el momento.")
+        
+    st.markdown("---")
+    st.markdown("### ⭐ Valoraciones de Mis Clientes")
+    df_mis_rev = pd.read_sql_query(
+        "SELECT cliente_nombre, estrellas, comentario, fecha FROM resenas WHERE empleado = ? AND bloqueado = 0",
+        conn, params=(st.session_state["user_nickname"],)
+    )
+    if not df_mis_rev.empty:
+        for _, mr in df_mis_rev.iterrows():
+            st.markdown(f"""
+            <div class="review-card">
+                <b>👤 {mr['cliente_nombre']}</b> — <span style="color:#FFD700;">{"⭐"*int(mr['estrellas'])}</span><br/>
+                <small>Fecha: {mr['fecha']}</small><br/>
+                <p style="margin-top:6px; margin-bottom:0px;">"{mr['comentario']}"</p>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("Aún no registras valoraciones directas.")
+        
     conn.close()
