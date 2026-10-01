@@ -766,33 +766,55 @@ elif st.session_state["user_role"] == "admin":
                         except sqlite3.IntegrityError:
                             st.error("El código de cupón ya existe.")
 
-    # TAB 6: MODERACIÓN DE RESEÑAS
+    # TAB 6: MODERACIÓN Y GESTIÓN COMPLETA DE RESEÑAS
     with t_rese:
-        st.subheader("⭐ Moderación de Reseñas Bloqueadas / Tóxicas")
-        df_rev_blocked = pd.read_sql_query("SELECT * FROM resenas WHERE bloqueado = 1", conn)
+        st.subheader("⭐ Gestión Completa de Reseñas")
+        
+        df_rev_all = pd.read_sql_query("SELECT * FROM resenas ORDER BY id DESC", conn)
 
-        if df_rev_blocked.empty:
-            st.info("No hay reseñas pendientes de moderación.")
+        if df_rev_all.empty:
+            st.info("No hay reseñas registradas en el sistema.")
         else:
-            for _, r_bloq in df_rev_blocked.iterrows():
-                with st.container(border=True):
-                    st.write(f"**Cliente:** {r_bloq['cliente_nombre']} | **Empleado:** {r_bloq['empleado']}")
-                    st.write(f"**Puntuación:** {'⭐'*int(r_bloq['estrellas'])}")
-                    st.write(f"**Comentario:** {r_bloq['comentario']}")
-                    
-                    col_b1, col_b2 = st.columns(2)
-                    if col_b1.button("Aprobar Reseña", key=f"app_rev_{r_bloq['id']}"):
-                        c = conn.cursor()
-                        c.execute("UPDATE resenas SET bloqueado = 0 WHERE id = ?", (r_bloq['id'],))
-                        conn.commit()
-                        st.success("Reseña aprobada.")
-                        st.rerun()
-                    if col_b2.button("Eliminar Reseña", key=f"del_rev_{r_bloq['id']}"):
-                        c = conn.cursor()
-                        c.execute("DELETE FROM resenas WHERE id = ?", (r_bloq['id'],))
-                        conn.commit()
-                        st.warning("Reseña eliminada.")
-                        st.rerun()
+            filtro_rev = st.radio("Filtrar vista:", ["Todas las Reseñas", "Solo Bloqueadas / Pendientes"], horizontal=True)
+            
+            if filtro_rev == "Solo Bloqueadas / Pendientes":
+                df_mostradas = df_rev_all[df_rev_all["bloqueado"] == 1]
+            else:
+                df_mostradas = df_rev_all
+
+            if df_mostradas.empty:
+                st.info("No hay reseñas para mostrar con el filtro seleccionado.")
+            else:
+                for _, r in df_mostradas.iterrows():
+                    with st.container(border=True):
+                        estado_tag = "🔴 Bloqueada / Oculta" if r['bloqueado'] == 1 else "🟢 Visible en Portal Cliente"
+                        st.write(f"**Cliente:** {r['cliente_nombre']} | **Atendió:** {r['empleado']} | **Estado:** {estado_tag}")
+                        st.write(f"**Calificación:** {'⭐'*int(r['estrellas'])} | **Fecha:** {r.get('fecha', 'N/A')}")
+                        st.write(f"**Comentario:** *\"{r['comentario']}\"*")
+                        
+                        col_b1, col_b2 = st.columns(2)
+                        
+                        if r['bloqueado'] == 1:
+                            if col_b1.button("✅ Aprobar / Mostrar", key=f"app_rev_{r['id']}"):
+                                c = conn.cursor()
+                                c.execute("UPDATE resenas SET bloqueado = 0 WHERE id = ?", (r['id'],))
+                                conn.commit()
+                                st.success("Reseña aprobada y visible para clientes.")
+                                st.rerun()
+                        else:
+                            if col_b1.button("🚫 Ocultar Reseña", key=f"block_rev_{r['id']}"):
+                                c = conn.cursor()
+                                c.execute("UPDATE resenas SET bloqueado = 1 WHERE id = ?", (r['id'],))
+                                conn.commit()
+                                st.warning("Reseña ocultada del portal público.")
+                                st.rerun()
+                                
+                        if col_b2.button("🗑️ Eliminar Definitivamente", key=f"del_rev_{r['id']}"):
+                            c = conn.cursor()
+                            c.execute("DELETE FROM resenas WHERE id = ?", (r['id'],))
+                            conn.commit()
+                            st.warning("Reseña eliminada de la base de datos.")
+                            st.rerun()
 
     # TAB 7: CONSULTAS ESCALADAS
     with t_esca:
