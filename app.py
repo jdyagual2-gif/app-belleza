@@ -25,6 +25,7 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
+    # Tabla Usuarios
     c.execute('''CREATE TABLE IF NOT EXISTS usuarios (
                     email TEXT PRIMARY KEY,
                     nickname TEXT,
@@ -33,6 +34,7 @@ def init_db():
                     estado_pago TEXT,
                     foto_url TEXT)''')
     
+    # Tabla Servicios
     c.execute('''CREATE TABLE IF NOT EXISTS servicios (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     nombre TEXT,
@@ -42,6 +44,7 @@ def init_db():
                     es_combo INTEGER,
                     imagen_url TEXT)''')
     
+    # Tabla Citas
     c.execute('''CREATE TABLE IF NOT EXISTS citas (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     cliente_email TEXT,
@@ -54,6 +57,7 @@ def init_db():
                     monto_total REAL,
                     estado TEXT)''')
     
+    # Tabla Reseñas
     c.execute('''CREATE TABLE IF NOT EXISTS resenas (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     cliente_nombre TEXT,
@@ -63,6 +67,7 @@ def init_db():
                     bloqueado INTEGER,
                     fecha TEXT)''')
     
+    # Tabla Preguntas Escaladas Bot
     c.execute('''CREATE TABLE IF NOT EXISTS preguntas_escaladas (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     cliente_email TEXT,
@@ -71,12 +76,14 @@ def init_db():
                     respuesta TEXT,
                     atendido INTEGER)''')
     
+    # Tabla Inventario
     c.execute('''CREATE TABLE IF NOT EXISTS inventario (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     producto TEXT,
                     cantidad INTEGER,
                     precio_unitario REAL)''')
 
+    # Tabla Cupones
     c.execute('''CREATE TABLE IF NOT EXISTS cupones (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     codigo TEXT UNIQUE,
@@ -98,12 +105,14 @@ def init_db():
     c.execute("UPDATE resenas SET fecha = ? WHERE fecha IS NULL OR fecha = ''", (hoy_str,))
     c.execute("UPDATE servicios SET imagen_url = '' WHERE imagen_url IS NULL")
 
+    # Poblado Inicial de Usuarios
     c.execute("SELECT COUNT(*) FROM usuarios")
     if c.fetchone()[0] == 0:
         c.execute("INSERT INTO usuarios VALUES ('jdyagual2@tes.edu.ec', 'SuperAdmin', 'admin', '0000000000', 'Al Día', '')")
         c.execute("INSERT INTO usuarios VALUES ('valeria@glowstudio.ai', 'Valeria (Master Colorista)', 'empleado', '0987654321', 'Al Día', 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400')")
         c.execute("INSERT INTO usuarios VALUES ('camila@glowstudio.ai', 'Camila (Makeup & Stylist)', 'empleado', '0912345678', 'Al Día', 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=400')")
 
+    # Poblado Inicial de Servicios
     c.execute("SELECT COUNT(*) FROM servicios")
     if c.fetchone()[0] == 0:
         c.executemany("INSERT INTO servicios (nombre, categoria, precio, disponible, es_combo, imagen_url) VALUES (?, ?, ?, ?, ?, ?)", [
@@ -116,6 +125,7 @@ def init_db():
             ("Combo VIP: Corte + Keratina + Manicure", "Combos", 190.0, 1, 1, "https://images.unsplash.com/photo-1527799820374-dcf8d9d4a388?w=600")
         ])
 
+    # Poblado Inicial de Reseñas
     c.execute("SELECT COUNT(*) FROM resenas")
     if c.fetchone()[0] == 0:
         c.executemany("INSERT INTO resenas (cliente_nombre, empleado, estrellas, comentario, bloqueado, fecha) VALUES (?, ?, ?, ?, ?, ?)", [
@@ -125,6 +135,7 @@ def init_db():
             ("Andrea P.", "Camila (Makeup & Stylist)", 4, "Súper buena experiencia, el manicure gel quedó hermoso.", 0, hoy_str)
         ])
 
+    # Poblado Inicial de Inventario
     c.execute("SELECT COUNT(*) FROM inventario")
     if c.fetchone()[0] == 0:
         c.executemany("INSERT INTO inventario (producto, cantidad, precio_unitario) VALUES (?, ?, ?)", [
@@ -134,6 +145,7 @@ def init_db():
             ("Base HD Maquillaje Glow", 22, 28.00)
         ])
 
+    # Poblado Inicial de Cupones
     c.execute("SELECT COUNT(*) FROM cupones")
     if c.fetchone()[0] == 0:
         c.execute("INSERT INTO cupones (codigo, descuento, activo) VALUES ('GLOW10', 10, 1)")
@@ -199,7 +211,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. FUNCIONES AUXILIARES & VISAGISMO IA
+# 3. FUNCIONES AUXILIARES Y LÓGICA DE IA
 # ==========================================
 def enviar_correo_confirmacion(destinatario, nombre, servicio, fecha, hora, total):
     try:
@@ -245,7 +257,6 @@ def enviar_correo_confirmacion(destinatario, nombre, servicio, fecha, hora, tota
         return False, str(e)
 
 def analizar_rostro_ia(img_file):
-    """Analiza dinámicamente la imagen para determinar el tipo de rostro real"""
     try:
         img = Image.open(img_file)
         w, h = img.size
@@ -277,7 +288,6 @@ def analizar_rostro_ia(img_file):
             "Alargado": "Se recomienda volumen en los laterales, flequillo recto o cortina para equilibrar las proporciones.",
             "Corazón": "Se recomiendan peinados con volumen a la altura del mentón, ondas desenfadadas y flequillos suaves."
         }
-        
         return forma, recoms.get(forma, "Corte personalizado según facciones.")
     except Exception:
         return "Cuadrado", "Se recomiendan capas desfiladas y ondas suaves para armonizar las facciones."
@@ -286,8 +296,44 @@ def check_toxic_comment(texto):
     palabras_prohibidas = ["pésimo", "estafadores", "basura", "horrible", "asco", "malditos", "idiotas", "robo"]
     return any(word in texto.lower() for word in palabras_prohibidas)
 
+def generar_respuesta_chat_ia(prompt, user_email):
+    p_lower = prompt.lower()
+    
+    conn = sqlite3.connect(DB_PATH)
+    df_serv = pd.read_sql_query("SELECT nombre, precio, categoria FROM servicios WHERE disponible = 1", conn)
+    conn.close()
+
+    if any(k in p_lower for k in ["precio", "costo", "cuanto vale", "cuanto cuesta", "catálogo", "catalogo", "tarifa"]):
+        servicios_str = "\n".join([f"• **{r['nombre']}** ({r['categoria']}): ${r['precio']:.2f} USD" for _, r in df_serv.iterrows()])
+        return f"✨ **Nuestros Servicios y Precios Actuales:**\n\n{servicios_str}\n\n¿Te gustaría que te ayude a agendar una cita para alguno de ellos?"
+
+    elif any(k in p_lower for k in ["agendar", "reservar", "cita", "turno", "calendario", "horario"]):
+        return "📅 ¡Es muy fácil agendar! Solo dirígete a la pestaña **'📅 Reserva & Calendario'**, elige a tu estilista favorita, selecciona la fecha y hora disponible y confirma tu cita."
+
+    elif any(k in p_lower for k in ["cupon", "cupón", "descuento", "promocion", "oferta", "código"]):
+        return "🎟️ **Promociones Activas:**\n- Usa el código **GLOW10** para obtener un 10% de descuento en servicios individuales.\n- Además, si pagas con **Tarjeta**, obtendrás un **5% OFF adicional** directamente en tu Checkout."
+
+    elif any(k in p_lower for k in ["dañado", "maltratado", "seco", "keratina", "botox"]):
+        return "💇‍♀️ Para cabello seco o procesado, te recomiendo nuestro **Tratamiento Keratina** ($120 USD) o solicitar una mascarilla Botox. Reestructuran profundamente la fibra capilar."
+
+    elif any(k in p_lower for k in ["evento", "fiesta", "boda", "maquillaje", "glam"]):
+        return "💄 Para ocasiones especiales te sugiero el **Combo Glam: Balayage + Makeup Glow** ($220 USD) o nuestro servicio estrella de **Makeup Glow HD** ($95 USD)."
+
+    elif any(k in p_lower for k in ["hola", "buenos dias", "buenas tardes", "buenas noches", "quien eres"]):
+        return "¡Hola! ✨ Soy **Bella IA**, tu asistente virtual de GlowStudio. Puedo orientarte sobre nuestros tratamientos, precios, promociones o guiarte para agendar una cita. ¿En qué puedo consentirte hoy?"
+
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        ahora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        c.execute("INSERT INTO preguntas_escaladas (cliente_email, pregunta, fecha_hora, respuesta, atendido) VALUES (?, ?, ?, ?, ?)",
+                  (user_email, prompt, ahora, "", 0))
+        conn.commit()
+        conn.close()
+        return "🤖 He registrado tu consulta especial. Un estilista o nuestro Administrador te responderá muy pronto. ¿Deseas consultar sobre alguno de nuestros tratamientos disponibles mientras tanto?"
+
 # ==========================================
-# 4. CONTROL DE SESIÓN Y LOGIN (RBAC)
+# 4. CONTROL DE SESIÓN Y LOGIN
 # ==========================================
 if "user_email" not in st.session_state:
     st.session_state["user_email"] = ""
@@ -299,6 +345,10 @@ if "carrito" not in st.session_state:
     st.session_state["carrito"] = []
 if "current_tab" not in st.session_state:
     st.session_state["current_tab"] = "🛍️ Catálogo & Combos"
+if "chat_messages" not in st.session_state:
+    st.session_state["chat_messages"] = [
+        {"role": "assistant", "content": "¡Hola! ✨ Soy **Bella IA**, tu personal shopper y asesora de belleza. ¿En qué puedo ayudarte hoy? Puedes preguntarme por servicios, precios, recomendaciones o cómo agendar tu cita."}
+    ]
 
 if not st.session_state["user_email"]:
     st.markdown('<div class="brand-header">GlowStudio AI</div>', unsafe_allow_html=True)
@@ -337,7 +387,7 @@ if not st.session_state["user_email"]:
                     st.rerun()
     st.stop()
 
-# --- SIDEBAR (CHATBOT CON IA INTELIGENTE Y NAVEGACIÓN) ---
+# --- SIDEBAR GLOBAL ---
 st.sidebar.markdown(f"### 👤 {st.session_state['user_nickname']}")
 role_class = f"role-{st.session_state['user_role']}"
 st.sidebar.markdown(f'<span class="role-badge {role_class}">Rol: {st.session_state["user_role"].upper()}</span>', unsafe_allow_html=True)
@@ -357,44 +407,29 @@ with st.sidebar.expander("💖 Bella IA & Visagismo (Asistente 24/7)", expanded=
     if img_file:
         image = Image.open(img_file)
         st.image(image, use_container_width=True, caption="Rostro Cargado para Análisis")
-        
         forma_detectada, recom_text = analizar_rostro_ia(img_file)
         st.success(f"✨ **Visagismo IA:** Rostro **{forma_detectada}** detectado.\n\n💡 {recom_text}")
 
-    st.markdown("#### 💬 Consultar o Agendar con Bella IA")
+    st.markdown("#### 💬 Consulta Rápida")
     user_msg = st.text_input("Escribe tu consulta:", key="bot_input_side")
     if st.button("Enviar Consulta", key="bot_btn_side"):
         if user_msg:
             msg_lower = user_msg.lower()
-            
-            # Redirección e Inteligencia de Navegación del Chatbot
             if any(k in msg_lower for k in ["agendar", "reservar", "reserva", "cita", "horario", "turnos", "calendario"]):
                 st.session_state["current_tab"] = "📅 Reserva & Calendario"
-                st.info("🤖 **Bella IA:** ¡Te he redirigido a la pestaña de **Reserva & Calendario** para que elijas tu horario!")
+                st.info("🤖 **Bella IA:** ¡Te he redirigido a la pestaña de **Reserva & Calendario**!")
                 st.rerun()
             elif any(k in msg_lower for k in ["catalogo", "catálogo", "servicio", "servicios", "combo", "combos", "precio", "precios"]):
                 st.session_state["current_tab"] = "🛍️ Catálogo & Combos"
-                st.info("🤖 **Bella IA:** ¡Te he abierto la pestaña de **Catálogo & Combos** para que explores nuestras opciones!")
+                st.info("🤖 **Bella IA:** ¡Te he abierto la pestaña de **Catálogo & Combos**!")
                 st.rerun()
-            elif any(k in msg_lower for k in ["reseña", "reseñas", "opinion", "opiniones", "comentario", "estrellas"]):
-                st.session_state["current_tab"] = "⭐ Mapa de Calor & Reseñas"
-                st.info("🤖 **Bella IA:** ¡Te llevo a la pestaña de **Mapa de Calor & Reseñas** para ver lo que opinan nuestras clientas!")
+            elif any(k in msg_lower for k in ["chat", "ia", "hablar", "conversar"]):
+                st.session_state["current_tab"] = "💬 Chat con IA (Bella)"
+                st.info("🤖 **Bella IA:** ¡Abriendo el Chat Principal con IA!")
                 st.rerun()
-            elif any(k in msg_lower for k in ["estresada", "estresado", "cansada", "relajación", "spa"]):
-                st.info("💖 **Bella IA:** Te recomiendo nuestro *Tratamiento Spa Keratina con Masaje Capilar*. ¡Te dejará totalmente renovada!")
-            elif any(k in msg_lower for k in ["cupon", "cupón", "descuento", "promocion", "oferta"]):
-                st.info("💖 **Bella IA:** Puedes usar el cupón **'GLOW10'** para un 10% OFF en servicios individuales o pagar con tarjeta para un 5% adicional.")
-            elif any(k in msg_lower for k in ["hola", "buenos dias", "buenas tardes"]):
-                st.info("💖 **Bella IA:** ¡Hola! Soy Bella IA. ¿Te ayudo a agendar una cita, ver nuestros servicios o analizar tu rostro?")
             else:
-                st.warning("🤖 **Bella IA:** Consulta registrada. El Administrador o un Estilista te contactará pronto.")
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                ahora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                c.execute("INSERT INTO preguntas_escaladas (cliente_email, pregunta, fecha_hora, respuesta, atendido) VALUES (?, ?, ?, ?, ?)",
-                          (st.session_state["user_email"], user_msg, ahora, "", 0))
-                conn.commit()
-                conn.close()
+                resp = generar_respuesta_chat_ia(user_msg, st.session_state["user_email"])
+                st.info(f"💖 **Bella IA:** {resp}")
 
 st.markdown('<div class="brand-header">GlowStudio AI | Luxury Spa</div>', unsafe_allow_html=True)
 
@@ -410,7 +445,7 @@ if st.session_state["user_role"] == "cliente":
             st.session_state["current_tab"] = "📅 Reserva & Calendario"
             st.rerun()
 
-    tab_options = ["🛍️ Catálogo & Combos", "📅 Reserva & Calendario", "⭐ Mapa de Calor & Reseñas"]
+    tab_options = ["🛍️️ Catálogo & Combos", "📅 Reserva & Calendario", "⭐ Mapa de Calor & Reseñas", "💬 Chat con IA (Bella)"]
     
     selected_tab = st.radio(
         "", 
@@ -420,7 +455,7 @@ if st.session_state["user_role"] == "cliente":
     )
     st.session_state["current_tab"] = selected_tab
 
-    # --- PESTAÑA 1: CATÁLOGO DE SERVICIOS ---
+    # --- PESTAÑA 1: CATÁLOGO ---
     if selected_tab == "🛍️ Catálogo & Combos":
         st.markdown("### 💄 Servicios Individuales y Combos Especiales")
         st.info("💡 **Regla de Descuento:** Los cupones aplican sobre servicios individuales. Los combos ya poseen un precio promocional especial.")
@@ -455,7 +490,7 @@ if st.session_state["user_role"] == "cliente":
                         st.toast(f"¡{row['nombre']} agregado al carrito!", icon="🛒")
                         st.rerun()
 
-    # --- PESTAÑA 2: CALENDARIO DE RESERVA & CHECKOUT ---
+    # --- PESTAÑA 2: RESERVA & CHECKOUT ---
     elif selected_tab == "📅 Reserva & Calendario":
         col_res1, col_res2 = st.columns([1.3, 1])
         
@@ -529,7 +564,7 @@ if st.session_state["user_role"] == "cliente":
                     if res_c:
                         subtotal_indiv = sum(x["precio"] for x in st.session_state["carrito"] if not x.get("es_combo", 0))
                         desc_cupon_monto = subtotal_indiv * (res_c[0] / 100.0)
-                        st.success(f"🎟️ Cupón '{cupon_in}' aplicado: -${desc_cupon_monto:.2f} ({res_c[0]}% en indiv.)")
+                        st.success(f"🎟️️ Cupón '{cupon_in}' aplicado: -${desc_cupon_monto:.2f} ({res_c[0]}% en indiv.)")
                     else:
                         st.warning("⚠️ Cupón no válido o expirado.")
 
@@ -570,7 +605,7 @@ if st.session_state["user_role"] == "cliente":
                         st.session_state["carrito"] = []
                         del st.session_state["hora_seleccionada"]
 
-    # --- PESTAÑA 3: MAPA DE CALOR & RESEÑAS PÚBLICAS ---
+    # --- PESTAÑA 3: RESEÑAS & MAPA DE CALOR ---
     elif selected_tab == "⭐ Mapa de Calor & Reseñas":
         st.markdown("### 📊 Promedio de Satisfacción & Opiniones")
         
@@ -624,8 +659,93 @@ if st.session_state["user_role"] == "cliente":
                     st.rerun()
         conn.close()
 
+    # --- PESTAÑA 4: CHAT CON IA ---
+    elif selected_tab == "💬 Chat con IA (Bella)":
+        st.markdown("### 🤖 Asistente de Belleza Virtual (Bella IA)")
+        st.caption("Hazme cualquier consulta sobre precios, promociones, agendamiento de citas o recomendaciones para el cuidado de tu imagen.")
+
+        for msg in st.session_state["chat_messages"]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        if prompt := st.chat_input("Escribe tu consulta o duda aquí..."):
+            st.session_state["chat_messages"].append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+
+            respuesta = generar_respuesta_chat_ia(prompt, st.session_state["user_email"])
+            st.session_state["chat_messages"].append({"role": "assistant", "content": respuesta})
+            with st.chat_message("assistant"):
+                st.markdown(respuesta)
+
 # ==========================================
-# 6. PANEL DE ADMINISTRADOR COMPLETO
+# 6. PANEL DE EMPLEADO
+# ==========================================
+elif st.session_state["user_role"] == "empleado":
+    st.markdown(f"## 💇‍♀️ Panel de Estilista / Profesional: {st.session_state['user_nickname']}")
+    
+    tab_e1, tab_e2, tab_e3 = st.tabs(["🗓️ Mis Citas Programadas", "⭐ Mis Reseñas", "👤 Mi Perfil"])
+    
+    conn = sqlite3.connect(DB_PATH)
+    
+    with tab_e1:
+        st.markdown("### 📅 Agenda de Citas Asignadas")
+        df_citas_emp = pd.read_sql_query("SELECT * FROM citas WHERE empleado = ? ORDER BY fecha DESC, hora ASC", conn, params=(st.session_state["user_nickname"],))
+        
+        if not df_citas_emp.empty:
+            for _, cita in df_citas_emp.iterrows():
+                with st.container(border=True):
+                    col_e1, col_e2, col_e3 = st.columns([2, 2, 1])
+                    col_e1.write(f"**Cliente:** {cita['cliente_nombre']} ({cita['cliente_email']})")
+                    col_e1.write(f"**Servicio:** {cita['servicio']}")
+                    col_e2.write(f"**Fecha y Hora:** {cita['fecha']} a las {cita['hora']}")
+                    col_e2.write(f"**Monto:** ${cita['monto_total']:.2f} ({cita['metodo_pago']})")
+                    
+                    nuevo_estado = col_e3.selectbox("Estado Cita", ["Confirmada", "Completada", "Cancelada"], index=["Confirmada", "Completada", "Cancelada"].index(cita['estado']) if cita['estado'] in ["Confirmada", "Completada", "Cancelada"] else 0, key=f"emp_est_{cita['id']}")
+                    if col_e3.button("Actualizar", key=f"btn_upd_e_{cita['id']}"):
+                        c = conn.cursor()
+                        c.execute("UPDATE citas SET estado = ? WHERE id = ?", (nuevo_estado, cita['id']))
+                        conn.commit()
+                        st.toast(f"Cita #{cita['id']} actualizada a {nuevo_estado}")
+                        st.rerun()
+        else:
+            st.info("No tienes citas asignadas por el momento.")
+
+    with tab_e2:
+        st.markdown("### ⭐ Opiniones de tus Clientes")
+        df_res_emp = pd.read_sql_query("SELECT * FROM resenas WHERE empleado = ? AND bloqueado = 0 ORDER BY id DESC", conn, params=(st.session_state["user_nickname"],))
+        if not df_res_emp.empty:
+            for _, r in df_res_emp.iterrows():
+                st.markdown(f"""
+                <div class="review-card">
+                    <b>👤 {r['cliente_nombre']}</b> — <span style="color:#FFD700;">{"⭐"*int(r['estrellas'])}</span><br/>
+                    <small>Fecha: {r['fecha']}</small><br/>
+                    <p style="margin-top:6px; margin-bottom:0px;">"{r['comentario']}"</p>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("Aún no tienes reseñas registradas.")
+
+    with tab_e3:
+        st.markdown("### 📸 Foto de Perfil & Datos")
+        df_perfil = pd.read_sql_query("SELECT * FROM usuarios WHERE email = ?", conn, params=(st.session_state["user_email"],))
+        if not df_perfil.empty:
+            foto_actual = df_perfil.iloc[0]["foto_url"] if "foto_url" in df_perfil.columns and pd.notna(df_perfil.iloc[0]["foto_url"]) else ""
+            if foto_actual:
+                st.image(foto_actual, width=180, caption="Foto Actual")
+            
+            nueva_foto = st.text_input("URL de Foto de Perfil:", value=foto_actual)
+            if st.button("Guardar Foto"):
+                c = conn.cursor()
+                c.execute("UPDATE usuarios SET foto_url = ? WHERE email = ?", (nueva_foto, st.session_state["user_email"]))
+                conn.commit()
+                st.success("¡Foto de perfil actualizada!")
+                st.rerun()
+
+    conn.close()
+
+# ==========================================
+# 7. PANEL DE ADMINISTRADOR COMPLETO
 # ==========================================
 elif st.session_state["user_role"] == "admin":
     st.markdown("## 👑 Panel de Control Integral (Administrador)")
@@ -633,7 +753,7 @@ elif st.session_state["user_role"] == "admin":
     t_citas, t_emp, t_serv, t_mod, t_inv, t_bot = st.tabs([
         "📅 Citas & Walk-ins",
         "👩‍🎨 Gestión Empleados",
-        "🛠️ Catálogo Servicios",
+        "🛠 Catálogo Servicios",
         "🛡️ Moderación Reseñas",
         "📊 Finanzas e Inventario",
         "📥 Consultas IA Chatbot"
@@ -641,268 +761,243 @@ elif st.session_state["user_role"] == "admin":
     
     conn = sqlite3.connect(DB_PATH)
     
-    # --- TAB 1: CITAS & WALK-INS ---
+    # --- TAB 1: CITAS Y WALK-INS ---
     with t_citas:
         st.markdown("### 📋 Registro General de Citas")
-        df_c = pd.read_sql_query("SELECT * FROM citas ORDER BY id DESC", conn)
         
+        with st.expander("➕ Agendar Cita Presencial (Walk-in)", expanded=False):
+            with st.form("form_walkin"):
+                w_nombre = st.text_input("Nombre del Cliente:")
+                w_email = st.text_input("Correo del Cliente:")
+                
+                df_emp_all = pd.read_sql_query("SELECT nickname FROM usuarios WHERE rol = 'empleado'", conn)
+                list_emp = df_emp_all["nickname"].tolist() if not df_emp_all.empty else ["Valeria (Master Colorista)", "Camila (Makeup & Stylist)"]
+                w_emp = st.selectbox("Estilista Asignada:", list_emp)
+                
+                df_serv_all = pd.read_sql_query("SELECT nombre, precio FROM servicios WHERE disponible = 1", conn)
+                w_serv = st.selectbox("Servicio / Combo:", df_serv_all["nombre"].tolist() if not df_serv_all.empty else ["Corte & Visagismo"])
+                
+                w_fecha = st.date_input("Fecha:", datetime.date.today())
+                w_hora = st.selectbox("Hora:", ["09:00", "10:30", "12:00", "14:00", "15:30", "17:00"])
+                w_metodo = st.selectbox("Método de Pago:", ["💵 Efectivo en Salón", "💳 Tarjeta"])
+                
+                monto_calc = df_serv_all[df_serv_all["nombre"] == w_serv]["precio"].iloc[0] if not df_serv_all.empty else 45.0
+                st.write(f"Monto a Cobrar: **${monto_calc:.2f} USD**")
+                
+                btn_walkin = st.form_submit_button("Registrar Cita Walk-in")
+                if btn_walkin:
+                    c = conn.cursor()
+                    c.execute("""INSERT INTO citas (cliente_email, cliente_nombre, empleado, servicio, fecha, hora, metodo_pago, monto_total, estado)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Confirmada')""",
+                              (w_email if w_email else "walkin@glowstudio.ai", w_nombre if w_nombre else "Cliente Walk-in", w_emp, w_serv, str(w_fecha), w_hora, w_metodo, monto_calc))
+                    conn.commit()
+                    st.success("¡Cita Walk-in registrada exitosamente!")
+                    st.rerun()
+
+        df_c = pd.read_sql_query("SELECT * FROM citas ORDER BY id DESC", conn)
         if not df_c.empty:
             st.dataframe(df_c, use_container_width=True)
             
-            st.markdown("#### Cambiar Estado de Cita")
-            col_c1, col_c2, col_c3 = st.columns([1, 1, 1])
-            cita_id = col_c1.selectbox("Selecciona ID de Cita:", df_c["id"].tolist())
-            nuevo_estado = col_c2.selectbox("Nuevo Estado:", ["Confirmada", "Atendida", "Cancelada"])
-            if col_c3.button("Actualizar Estado"):
-                c = conn.cursor()
-                c.execute("UPDATE citas SET estado = ? WHERE id = ?", (nuevo_estado, cita_id))
-                conn.commit()
-                st.success(f"Cita #{cita_id} actualizada a '{nuevo_estado}'")
-                st.rerun()
+            col_admin_c1, col_admin_c2 = st.columns(2)
+            with col_admin_c1:
+                id_cita_mod = st.number_input("ID Cita a Modificar Estado:", min_value=1, step=1)
+                est_cita_mod = st.selectbox("Nuevo Estado:", ["Confirmada", "Completada", "Cancelada"], key="sel_est_adm")
+                if st.button("Actualizar Estado Cita"):
+                    c = conn.cursor()
+                    c.execute("UPDATE citas SET estado = ? WHERE id = ?", (est_cita_mod, id_cita_mod))
+                    conn.commit()
+                    st.success(f"Cita #{id_cita_mod} actualizada.")
+                    st.rerun()
+            
+            with col_admin_c2:
+                id_cita_del = st.number_input("ID Cita a Eliminar:", min_value=1, step=1, key="del_c_num")
+                if st.button("🗑️ Eliminar Cita", key="btn_del_c"):
+                    c = conn.cursor()
+                    c.execute("DELETE FROM citas WHERE id = ?", (id_cita_del,))
+                    conn.commit()
+                    st.success(f"Cita #{id_cita_del} eliminada.")
+                    st.rerun()
         else:
-            st.info("No hay citas registradas.")
-
-        st.markdown("---")
-        st.markdown("### 🚶 Registro Manual de Walk-in (Atención Presencial)")
-        with st.form("form_walkin"):
-            w_nombre = st.text_input("Nombre del Cliente:")
-            w_email = st.text_input("Correo (Opcional):", value="walkin@glowstudio.ai")
-            
-            df_e = pd.read_sql_query("SELECT nickname FROM usuarios WHERE rol = 'empleado'", conn)
-            lista_emp = df_e["nickname"].tolist() if not df_e.empty else ["Valeria (Master Colorista)"]
-            w_emp = st.selectbox("Estilista Asignado:", lista_emp)
-            
-            df_s = pd.read_sql_query("SELECT nombre, precio FROM servicios WHERE disponible = 1", conn)
-            w_serv = st.selectbox("Servicio Solicitado:", df_s["nombre"].tolist() if not df_s.empty else ["Corte & Visagismo"])
-            precio_s = df_s[df_s["nombre"] == w_serv]["precio"].values[0] if not df_s.empty else 45.0
-            
-            w_fecha = st.date_input("Fecha:", value=datetime.date.today())
-            w_hora = st.time_input("Hora:", value=datetime.time(10, 0)).strftime("%H:%M")
-            w_monto = st.number_input("Monto Cobrado ($):", value=float(precio_s))
-            w_metodo = st.selectbox("Método de Pago:", ["Efectivo", "Tarjeta"])
-            
-            if st.form_submit_button("➕ Registrar Walk-in"):
-                c = conn.cursor()
-                c.execute("""INSERT INTO citas (cliente_email, cliente_nombre, empleado, servicio, fecha, hora, metodo_pago, monto_total, estado)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                          (w_email, w_nombre, w_emp, w_serv, str(w_fecha), w_hora, w_metodo, w_monto, "Atendida"))
-                conn.commit()
-                st.success("¡Walk-in registrado exitosamente!")
-                st.rerun()
+            st.info("No hay citas registradas hasta el momento.")
 
     # --- TAB 2: GESTIÓN EMPLEADOS ---
     with t_emp:
-        st.markdown("### 👩‍🎨 Personal y Estilistas")
-        df_emp = pd.read_sql_query("SELECT email, nickname, cedula, estado_pago, foto_url FROM usuarios WHERE rol = 'empleado'", conn)
-        st.dataframe(df_emp, use_container_width=True)
+        st.markdown("### 👩‍🎨 Gestión de Personal & Colaboradores")
+        
+        with st.expander("➕ Registrar Nuevo Empleado / Administrador", expanded=False):
+            with st.form("form_add_user"):
+                u_email = st.text_input("Correo Electrónico:")
+                u_nick = st.text_input("Nombre / Apodo:")
+                u_cedula = st.text_input("Cédula / Documento:")
+                u_rol = st.selectbox("Rol Asignado:", ["empleado", "admin", "cliente"])
+                u_foto = st.text_input("URL Foto de Perfil:")
+                
+                btn_add_user = st.form_submit_button("Guardar Usuario")
+                if btn_add_user:
+                    if not u_email or not u_nick:
+                        st.warning("Completa los campos obligatorios.")
+                    else:
+                        c = conn.cursor()
+                        c.execute("INSERT OR REPLACE INTO usuarios (email, nickname, rol, cedula, estado_pago, foto_url) VALUES (?, ?, ?, ?, 'Al Día', ?)",
+                                  (u_email.lower(), u_nick, u_rol, u_cedula, u_foto))
+                        conn.commit()
+                        st.success(f"Usuario {u_nick} registrado exitosamente.")
+                        st.rerun()
 
-        st.markdown("#### ➕ Registrar Nuevo Empleado")
-        with st.form("form_add_emp"):
-            e_email = st.text_input("Correo Electrónico:")
-            e_nick = st.text_input("Nombre / Apodo Profesional:")
-            e_cedula = st.text_input("Cédula / Identificación:")
-            e_foto = st.text_input("URL Foto de Perfil (Unsplash, etc.):", value="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400")
-            
-            if st.form_submit_button("Guardar Empleado"):
-                if e_email and e_nick:
+        df_emp_list = pd.read_sql_query("SELECT email, nickname, rol, cedula, estado_pago, foto_url FROM usuarios", conn)
+        st.dataframe(df_emp_list, use_container_width=True)
+        
+        col_u_del, _ = st.columns(2)
+        with col_u_del:
+            u_del_email = st.text_input("Correo de Usuario a Eliminar:")
+            if st.button("🗑️ Eliminar Usuario"):
+                if u_del_email:
                     c = conn.cursor()
-                    c.execute("INSERT OR REPLACE INTO usuarios (email, nickname, rol, cedula, estado_pago, foto_url) VALUES (?, ?, 'empleado', ?, 'Al Día', ?)",
-                              (e_email.lower(), e_nick, e_cedula, e_foto))
+                    c.execute("DELETE FROM usuarios WHERE LOWER(email) = ?", (u_del_email.lower(),))
                     conn.commit()
-                    st.success(f"Empleado '{e_nick}' registrado correctamente.")
+                    st.success("Usuario eliminado correctamente.")
                     st.rerun()
-                else:
-                    st.warning("Ingresa email y apodo.")
 
     # --- TAB 3: CATÁLOGO SERVICIOS ---
     with t_serv:
-        st.markdown("### 🛠️ Administración de Catálogo & Combos")
-        df_s_all = pd.read_sql_query("SELECT * FROM servicios", conn)
-        st.dataframe(df_s_all, use_container_width=True)
-
-        col_serv_l, col_serv_r = st.columns(2)
-        with col_serv_l:
-            st.markdown("#### ➕ Añadir Servicio o Combo")
+        st.markdown("### 🛠️ Configuración de Servicios y Combos")
+        
+        with st.expander("➕ Añadir Nuevo Servicio o Combo", expanded=False):
             with st.form("form_add_serv"):
-                s_nombre = st.text_input("Nombre del Servicio/Combo:")
-                s_cat = st.selectbox("Categoría:", ["Colorimetría", "Maquillaje", "Uñas", "Corte", "Capilar", "Combos"])
-                s_precio = st.number_input("Precio ($):", min_value=0.0, value=50.0)
-                s_combo = st.checkbox("¿Es un Combo Especial?")
-                s_img = st.text_input("URL de Imagen:", value="https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=600")
+                s_nombre = st.text_input("Nombre del Servicio:")
+                s_cat = st.selectbox("Categoría:", ["Colorimetría", "Maquillaje", "Uñas", "Corte", "Capilar", "Combos", "Otros"])
+                s_precio = st.number_input("Precio ($ USD):", min_value=0.0, step=5.0)
+                s_combo = st.checkbox("¿Es Combo Promocional Especial?")
+                s_img = st.text_input("URL Imagen Ilustrativa:")
                 
-                if st.form_submit_button("Crear Servicio"):
-                    if s_nombre:
+                btn_add_s = st.form_submit_button("Guardar Servicio")
+                if btn_add_s:
+                    if not s_nombre:
+                        st.warning("Escribe un nombre para el servicio.")
+                    else:
                         c = conn.cursor()
                         c.execute("INSERT INTO servicios (nombre, categoria, precio, disponible, es_combo, imagen_url) VALUES (?, ?, ?, 1, ?, ?)",
                                   (s_nombre, s_cat, s_precio, 1 if s_combo else 0, s_img))
                         conn.commit()
-                        st.success(f"Servicio '{s_nombre}' añadido.")
+                        st.success(f"Servicio '{s_nombre}' añadido con éxito.")
                         st.rerun()
 
-        with col_serv_r:
-            st.markdown("#### 🔄 Cambiar Disponibilidad / Eliminar")
-            if not df_s_all.empty:
-                s_id_sel = st.selectbox("Selecciona ID de Servicio:", df_s_all["id"].tolist())
-                col_b1, col_b2 = st.columns(2)
-                if col_b1.button("Toggle Disponibilidad"):
-                    c = conn.cursor()
-                    c.execute("UPDATE servicios SET disponible = CASE WHEN disponible = 1 THEN 0 ELSE 1 END WHERE id = ?", (s_id_sel,))
-                    conn.commit()
-                    st.success("Estado de disponibilidad cambiado.")
-                    st.rerun()
-                if col_b2.button("🗑️ Eliminar Servicio"):
-                    c = conn.cursor()
-                    c.execute("DELETE FROM servicios WHERE id = ?", (s_id_sel,))
-                    conn.commit()
-                    st.warning("Servicio eliminado.")
-                    st.rerun()
+        df_s_all = pd.read_sql_query("SELECT * FROM servicios", conn)
+        st.dataframe(df_s_all, use_container_width=True)
+        
+        col_s_edit1, col_s_edit2 = st.columns(2)
+        with col_s_edit1:
+            id_s_toggle = st.number_input("ID Servicio a Cambiar Disponibilidad / Precio:", min_value=1, step=1)
+            precio_s_new = st.number_input("Nuevo Precio ($ USD):", min_value=0.0, step=5.0, key="new_p_s")
+            disp_s_new = st.selectbox("Estado Disponibilidad:", ["Disponible", "Agotado / Inactivo"])
+            if st.button("Actualizar Servicio"):
+                c = conn.cursor()
+                c.execute("UPDATE servicios SET precio = ?, disponible = ? WHERE id = ?", 
+                          (precio_s_new, 1 if disp_s_new == "Disponible" else 0, id_s_toggle))
+                conn.commit()
+                st.success(f"Servicio #{id_s_toggle} actualizado.")
+                st.rerun()
+                
+        with col_s_edit2:
+            id_s_del = st.number_input("ID Servicio a Eliminar:", min_value=1, step=1, key="del_s_num")
+            if st.button("🗑️ Eliminar Servicio", key="btn_del_s"):
+                c = conn.cursor()
+                c.execute("DELETE FROM servicios WHERE id = ?", (id_s_del,))
+                conn.commit()
+                st.success(f"Servicio #{id_s_del} eliminado.")
+                st.rerun()
 
     # --- TAB 4: MODERACIÓN RESEÑAS ---
     with t_mod:
-        st.markdown("### 🛡️ Reseñas Bloqueadas / Moderadas")
-        df_rev_blocked = pd.read_sql_query("SELECT * FROM resenas WHERE bloqueado = 1", conn)
+        st.markdown("### 🛡️ Moderación y Filtro de Reseñas Tómbolas/Tóxicas")
+        df_r_all = pd.read_sql_query("SELECT * FROM resenas ORDER BY id DESC", conn)
         
-        if not df_rev_blocked.empty:
-            for _, rb in df_rev_blocked.iterrows():
-                with st.container(border=True):
-                    st.write(f"**ID:** {rb['id']} | **Cliente:** {rb['cliente_nombre']} | **Estilista:** {rb['empleado']}")
-                    st.write(f"**Estrellas:** {'⭐'*int(rb['estrellas'])}")
-                    st.write(f"**Comentario detectado:** {rb['comentario']}")
-                    
-                    col_m1, col_m2 = st.columns(2)
-                    if col_m1.button("✅ Aprobar Reseña", key=f"app_{rb['id']}"):
-                        c = conn.cursor()
-                        c.execute("UPDATE resenas SET bloqueado = 0 WHERE id = ?", (rb['id'],))
-                        conn.commit()
-                        st.success("Reseña aprobada.")
-                        st.rerun()
-                    if col_m2.button("🗑️ Eliminar Definitivamente", key=f"del_rev_{rb['id']}"):
-                        c = conn.cursor()
-                        c.execute("DELETE FROM resenas WHERE id = ?", (rb['id'],))
-                        conn.commit()
-                        st.info("Reseña eliminada.")
-                        st.rerun()
+        if not df_r_all.empty:
+            st.dataframe(df_r_all, use_container_width=True)
+            
+            col_mod1, col_mod2 = st.columns(2)
+            with col_mod1:
+                id_r_toggle = st.number_input("ID Reseña a Cambiar Estado (Bloquear/Aprobar):", min_value=1, step=1)
+                estado_r_mod = st.selectbox("Acción Moderación:", ["Aprobar (Pública)", "Bloquear (Oculta)"])
+                if st.button("Aplicar Moderación"):
+                    c = conn.cursor()
+                    c.execute("UPDATE resenas SET bloqueado = ? WHERE id = ?", (1 if estado_r_mod == "Bloquear (Oculta)" else 0, id_r_toggle))
+                    conn.commit()
+                    st.success(f"Reseña #{id_r_toggle} moderada con éxito.")
+                    st.rerun()
+            
+            with col_mod2:
+                id_r_del = st.number_input("ID Reseña a Eliminar Definitivamente:", min_value=1, step=1, key="del_r_num")
+                if st.button("🗑️ Eliminar Reseña", key="btn_del_r"):
+                    c = conn.cursor()
+                    c.execute("DELETE FROM resenas WHERE id = ?", (id_r_del,))
+                    conn.commit()
+                    st.success(f"Reseña #{id_r_del} eliminada.")
+                    st.rerun()
         else:
-            st.success("🎉 No hay reseñas pendientes de moderación por lenguaje inapropiado.")
+            st.info("No hay reseñas registradas.")
 
     # --- TAB 5: FINANZAS E INVENTARIO ---
     with t_inv:
-        st.markdown("### 📈 Indicadores Financieros & Control de Stock")
+        col_inv1, col_inv2 = st.columns([1.5, 1])
         
-        df_c_ok = pd.read_sql_query("SELECT monto_total FROM citas WHERE estado != 'Cancelada'", conn)
-        total_ingresos = df_c_ok["monto_total"].sum() if not df_c_ok.empty else 0.0
-        
-        col_f1, col_f2, col_f3 = st.columns(3)
-        col_f1.metric("💰 Ingresos Totales", f"${total_ingresos:.2f} USD")
-        col_f2.metric("📅 Citas Atendidas / Confirmadas", len(df_c_ok))
-        
-        df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
-        col_f3.metric("📦 Productos en Stock", len(df_inv))
-        
-        st.markdown("---")
-        st.markdown("#### 📦 Inventario de Productos")
-        st.dataframe(df_inv, use_container_width=True)
-        
-        col_i_a, col_i_b = st.columns(2)
-        with col_i_a:
-            st.markdown("##### ➕ Agregar Producto al Stock")
-            with st.form("form_add_inv"):
-                p_nombre = st.text_input("Producto:")
-                p_cant = st.number_input("Cantidad Inicial:", min_value=1, value=10)
-                p_prec = st.number_input("Precio Unitario ($):", min_value=0.0, value=15.0)
-                if st.form_submit_button("Guardar Producto"):
-                    c = conn.cursor()
-                    c.execute("INSERT INTO inventario (producto, cantidad, precio_unitario) VALUES (?, ?, ?)", (p_nombre, p_cant, p_prec))
-                    conn.commit()
-                    st.success("Producto registrado.")
-                    st.rerun()
-
-        with col_i_b:
-            st.markdown("##### 🎟️ Gestión de Cupones")
-            df_coup = pd.read_sql_query("SELECT * FROM cupones", conn)
-            st.dataframe(df_coup, use_container_width=True)
-            with st.form("form_add_cupon"):
-                c_code = st.text_input("Código de Cupón:").strip().upper()
-                c_desc = st.number_input("Descuento (%):", min_value=1, max_value=100, value=15)
-                if st.form_submit_button("Crear Cupón"):
-                    if c_code:
+        with col_inv1:
+            st.markdown("### 📦 Inventario de insumos")
+            df_inv_all = pd.read_sql_query("SELECT * FROM inventario", conn)
+            st.dataframe(df_inv_all, use_container_width=True)
+            
+            with st.expander("➕ Agregar / Actualizar Producto de Inventario"):
+                with st.form("form_inv"):
+                    p_nombre = st.text_input("Nombre del Producto:")
+                    p_cant = st.number_input("Cantidad:", min_value=1, step=1)
+                    p_precio = st.number_input("Precio Unitario ($):", min_value=0.0, step=1.0)
+                    btn_inv = st.form_submit_button("Guardar en Inventario")
+                    if btn_inv:
                         c = conn.cursor()
-                        c.execute("INSERT OR REPLACE INTO cupones (codigo, descuento, activo) VALUES (?, ?, 1)", (c_code, c_desc))
+                        c.execute("INSERT INTO inventario (producto, cantidad, precio_unitario) VALUES (?, ?, ?)", (p_nombre, p_cant, p_precio))
                         conn.commit()
-                        st.success(f"Cupón {c_code} guardado.")
+                        st.success("Producto agregado a stock.")
                         st.rerun()
 
-    # --- TAB 6: CONSULTAS IA CHATBOT ---
-    with t_bot:
-        st.markdown("### 📥 Preguntas Escaladas desde Bella IA")
-        df_esc = pd.read_sql_query("SELECT * FROM preguntas_escaladas ORDER BY id DESC", conn)
-        
-        if not df_esc.empty:
-            for _, q in df_esc.iterrows():
-                estado_at = "✅ Atendido" if q["atendido"] else "🔴 Pendiente"
-                with st.expander(f"Pregunta #{q['id']} - {q['cliente_email']} ({estado_at})"):
-                    st.write(f"**Fecha/Hora:** {q['fecha_hora']}")
-                    st.write(f"**Pregunta:** {q['pregunta']}")
-                    if q["respuesta"]:
-                        st.info(f"**Respuesta enviada:** {q['respuesta']}")
-                    else:
-                        resp_in = st.text_area("Escribe tu respuesta para el cliente:", key=f"resp_{q['id']}")
-                        if st.button("Enviar Respuesta", key=f"btn_resp_{q['id']}"):
-                            c = conn.cursor()
-                            c.execute("UPDATE preguntas_escaladas SET respuesta = ?, atendido = 1 WHERE id = ?", (resp_in, q['id']))
-                            conn.commit()
-                            st.success("Respuesta guardada con éxito.")
-                            st.rerun()
-        else:
-            st.info("No hay preguntas registradas en el asistente.")
+        with col_inv2:
+            st.markdown("### 🎟️ Gestor de Cupones")
+            df_cup_all = pd.read_sql_query("SELECT * FROM cupones", conn)
+            st.dataframe(df_cup_all, use_container_width=True)
             
-    conn.close()
+            with st.form("form_cupon"):
+                c_codigo = st.text_input("Código de Cupón (ej: GLOW15):").strip().upper()
+                c_desc = st.number_input("Porcentaje Descuento (%):", min_value=1, max_value=100, step=5)
+                btn_cup = st.form_submit_button("Crear Cupón")
+                if btn_cup:
+                    if c_codigo:
+                        try:
+                            c = conn.cursor()
+                            c.execute("INSERT INTO cupones (codigo, descuento, activo) VALUES (?, ?, 1)", (c_codigo, c_desc))
+                            conn.commit()
+                            st.success(f"Cupón {c_codigo} creado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error o cupón duplicado: {e}")
 
-# ==========================================
-# 7. PANEL DE EMPLEADO (ESTILISTA)
-# ==========================================
-elif st.session_state["user_role"] == "empleado":
-    st.markdown(f"## 👩‍🎨 Panel de Estilista — {st.session_state['user_nickname']}")
-    
-    conn = sqlite3.connect(DB_PATH)
-    
-    st.markdown("### 📅 Mis Citas Programadas")
-    df_mis_citas = pd.read_sql_query(
-        "SELECT * FROM citas WHERE empleado = ? ORDER BY fecha, hora", 
-        conn, params=(st.session_state["user_nickname"],)
-    )
-    
-    if not df_mis_citas.empty:
-        st.dataframe(df_mis_citas, use_container_width=True)
+    # --- TAB 6: CONSULTAS ESCALADAS IA ---
+    with t_bot:
+        st.markdown("### 📥 Consultas Escaladas por Bella IA (Pendientes de Atención)")
+        df_p_all = pd.read_sql_query("SELECT * FROM preguntas_escaladas ORDER BY atendido ASC, id DESC", conn)
         
-        st.markdown("#### Marcar Cita como Atendida")
-        col_e1, col_e2 = st.columns([2, 1])
-        cita_emp_id = col_e1.selectbox("Selecciona ID de Cita:", df_mis_citas[df_mis_citas["estado"] == "Confirmada"]["id"].tolist() if not df_mis_citas[df_mis_citas["estado"] == "Confirmada"].empty else df_mis_citas["id"].tolist())
-        if col_e2.button("✅ Marcar Atendida"):
-            c = conn.cursor()
-            c.execute("UPDATE citas SET estado = 'Atendida' WHERE id = ?", (cita_emp_id,))
-            conn.commit()
-            st.success(f"Cita #{cita_emp_id} completada.")
-            st.rerun()
-    else:
-        st.info("No tienes citas asignadas por el momento.")
-        
-    st.markdown("---")
-    st.markdown("### ⭐ Valoraciones de Mis Clientes")
-    df_mis_rev = pd.read_sql_query(
-        "SELECT cliente_nombre, estrellas, comentario, fecha FROM resenas WHERE empleado = ? AND bloqueado = 0",
-        conn, params=(st.session_state["user_nickname"],)
-    )
-    if not df_mis_rev.empty:
-        for _, mr in df_mis_rev.iterrows():
-            st.markdown(f"""
-            <div class="review-card">
-                <b>👤 {mr['cliente_nombre']}</b> — <span style="color:#FFD700;">{"⭐"*int(mr['estrellas'])}</span><br/>
-                <small>Fecha: {mr['fecha']}</small><br/>
-                <p style="margin-top:6px; margin-bottom:0px;">"{mr['comentario']}"</p>
-            </div>
-            """, unsafe_allow_html=True)
-    else:
-        st.info("Aún no registras valoraciones directas.")
-        
+        if not df_p_all.empty:
+            st.dataframe(df_p_all, use_container_width=True)
+            
+            with st.form("form_resp_bot"):
+                id_p_sel = st.number_input("ID Pregunta a Responder:", min_value=1, step=1)
+                texto_resp = st.text_area("Respuesta Oficial del Salón:")
+                btn_p_resp = st.form_submit_button("Enviar y Marcar como Atendido")
+                if btn_p_resp:
+                    c = conn.cursor()
+                    c.execute("UPDATE preguntas_escaladas SET respuesta = ?, atendido = 1 WHERE id = ?", (texto_resp, id_p_sel))
+                    conn.commit()
+                    st.success(f"Pregunta #{id_p_sel} atendida correctamente.")
+                    st.rerun()
+        else:
+            st.info("No hay consultas registratadas.")
+
     conn.close()
