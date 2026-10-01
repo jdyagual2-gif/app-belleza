@@ -749,6 +749,7 @@ elif st.session_state["user_role"] == "empleado":
     st.markdown("## ✂️ Panel de Atención para Empleados y Estilistas")
     
     conn = sqlite3.connect(DB_PATH)
+    
     st.markdown("### 📅 Mis Citas Asignadas")
     df_emp_citas = pd.read_sql_query("SELECT * FROM citas WHERE empleado LIKE ? ORDER BY fecha, hora", conn, params=(f"%{st.session_state['user_nickname']}%",))
     if df_emp_citas.empty:
@@ -756,6 +757,38 @@ elif st.session_state["user_role"] == "empleado":
     else:
         st.dataframe(df_emp_citas, use_container_width=True)
         
+    st.markdown("---")
+    st.markdown("### 🚶‍♂️ Agendar Cita Presencial / Walk-in")
+    with st.form("form_walkin_emp"):
+        col_w1, col_w2 = st.columns(2)
+        c_nom = col_w1.text_input("Nombre del Cliente:")
+        c_email = col_w2.text_input("Correo Electrónico del Cliente:")
+        
+        df_serv_all = pd.read_sql_query("SELECT nombre, precio FROM servicios WHERE disponible=1", conn)
+        s_nom = col_w1.selectbox("Servicio / Combo:", df_serv_all["nombre"].tolist() if not df_serv_all.empty else ["Balayage Neón"])
+        
+        df_emp_all = pd.read_sql_query("SELECT nickname FROM usuarios WHERE rol='empleado'", conn)
+        emp_list = df_emp_all["nickname"].tolist() if not df_emp_all.empty else [st.session_state["user_nickname"]]
+        
+        # Selecciona por defecto al empleado con la sesión activa
+        default_idx = emp_list.index(st.session_state["user_nickname"]) if st.session_state["user_nickname"] in emp_list else 0
+        e_nom = col_w2.selectbox("Estilista Asignada:", emp_list, index=default_idx)
+        
+        w_fecha = col_w1.date_input("Fecha:", value=datetime.date.today())
+        w_hora = col_w2.selectbox("Hora:", ["09:00", "10:30", "12:00", "14:00", "15:30", "17:00"])
+        
+        monto_val = df_serv_all[df_serv_all["nombre"] == s_nom]["precio"].values[0] if not df_serv_all.empty else 50.0
+        
+        btn_walkin_emp = st.form_submit_button("Registrar y Agendar Cita")
+        if btn_walkin_emp:
+            c = conn.cursor()
+            c.execute("""INSERT INTO citas (cliente_email, cliente_nombre, empleado, servicio, fecha, hora, metodo_pago, monto_total, estado)
+                         VALUES (?, ?, ?, ?, ?, ?, 'Efectivo Walk-in', ?, 'Confirmada')""",
+                      (c_email, c_nom, e_nom, s_nom, str(w_fecha), w_hora, monto_val))
+            conn.commit()
+            st.success("¡Cita agendada con éxito por el empleado!")
+            st.rerun()
+
     st.markdown("---")
     st.markdown("### 💬 Consultas de Clientes Pendientes")
     df_p = pd.read_sql_query("SELECT * FROM preguntas_escaladas WHERE atendido = 0", conn)
